@@ -1,0 +1,1 @@
+Этот файл — placeholder. Реальные runtime/model бинарники не включены в исходный архив Milestone 1.
