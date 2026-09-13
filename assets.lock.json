@@ -1,0 +1,17 @@
+{
+  "generatedUtc": "2026-09-13T00:00:00Z",
+  "llamaCpp": {
+    "tag": "b10941",
+    "commit": "4a89937354190cef5a97baf8eeb17336105eb72d",
+    "cpuSha256": "033ab72aa6fc69059e7529affa383b93201b612abbe72ea39bba103560a81cc8",
+    "cudaSha256": "ed4767e423cf629b180c9dab9fdd8abb242faa822402afb8fe586cc71a815eea",
+    "cudaRuntimeSha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+  },
+  "model": {
+    "repository": "Qwen/Qwen3-0.6B-GGUF",
+    "file": "Qwen3-0.6B-Q8_0.gguf",
+    "localFile": "models/chat/model.gguf",
+    "sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+    "license": "Apache-2.0"
+  }
+}

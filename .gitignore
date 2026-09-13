@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+dist/
+.vs/
+*.user
+*.suo
+models/**/*.gguf
+runtime/llama/**/*.exe
+runtime/llama/**/*.dll
+logs/*
+!logs/.gitkeep

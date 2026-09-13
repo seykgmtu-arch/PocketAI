@@ -1,0 +1,11 @@
+{
+  "modelPath": "models/chat/model.gguf",
+  "runtime": {
+    "cpuPath": "runtime/llama/cpu/llama-server.exe",
+    "cudaPath": "runtime/llama/cuda/llama-server.exe"
+  },
+  "contextSize": 4096,
+  "maxOutputTokens": 512,
+  "temperature": 0.6,
+  "systemPrompt": "Ты Pocket AI — локальный приватный помощник. Отвечай по существу и на языке пользователя. Для этой тестовой модели работай без режима скрытого рассуждения: /no_think. Не раскрывай скрытые рассуждения; показывай только полезный итоговый ответ."
+}
