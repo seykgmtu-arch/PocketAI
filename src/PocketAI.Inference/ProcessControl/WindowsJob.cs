@@ -8,7 +8,7 @@ namespace PocketAI.Inference.ProcessControl;
 internal sealed class WindowsJob : IDisposable
 {
     private const uint JobObjectLimitKillOnJobClose = 0x00002000;
-    private const int JobObjectExtendedLimitInformation = 9;
+    private const int JobObjectExtendedLimitInformationClass = 9;
 
     private readonly SafeFileHandle _handle;
 
@@ -24,7 +24,7 @@ internal sealed class WindowsJob : IDisposable
         var size = Marshal.SizeOf<JobObjectExtendedLimitInformation>();
         if (!SetInformationJobObject(
                 _handle.DangerousGetHandle(),
-                JobObjectExtendedLimitInformation,
+                JobObjectExtendedLimitInformationClass,
                 ref info,
                 (uint)size))
         {
