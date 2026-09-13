@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -16,29 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Import original source archive (one-time)
-        if: hashFiles('PocketAI-GitHub-Ready.zip') != ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $destination = Join-Path $env:RUNNER_TEMP 'pocketai-source-import'
-          Expand-Archive -LiteralPath .\PocketAI-GitHub-Ready.zip -DestinationPath $destination
-          $source = Join-Path $destination 'PocketAI-Milestone1'
-          Get-ChildItem -LiteralPath $source -Force | Where-Object { $_.Name -ne '.github' } | Copy-Item -Destination $env:GITHUB_WORKSPACE -Recurse -Force
-          git rm -- PocketAI-GitHub-Ready.zip
-          if ($LASTEXITCODE -ne 0) { throw 'Could not remove source archive' }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all
-          git commit -m 'Import PocketAI source tree from GitHub-ready archive'
-          if ($LASTEXITCODE -ne 0) { throw 'Source import commit failed' }
-          git push origin HEAD:main
-          if ($LASTEXITCODE -ne 0) { throw 'Source import push failed' }
-
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore .\PocketAI.sln
+
+      - name: Build
+        run: dotnet build .\PocketAI.sln -c Release --no-restore
 
       - name: Cache downloaded AI assets
         uses: actions/cache@v4
@@ -57,12 +44,6 @@ jobs:
       - name: Smoke-test llama.cpp CPU runtime
         shell: pwsh
         run: .\scripts\smoke-test-runtime.ps1
-
-      - name: Restore
-        run: dotnet restore .\PocketAI.sln
-
-      - name: Build
-        run: dotnet build .\PocketAI.sln -c Release --no-restore
 
       - name: Publish self-contained win-x64
         shell: pwsh
