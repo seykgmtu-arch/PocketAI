@@ -190,9 +190,11 @@ public sealed class LlamaServerManager : IDisposable
     {
         try
         {
-            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            while (!cancellationToken.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null)
+                    break;
                 _recentOutput.Add(line);
             }
         }
