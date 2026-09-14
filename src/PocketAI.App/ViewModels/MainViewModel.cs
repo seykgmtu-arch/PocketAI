@@ -941,56 +941,109 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
                 _baseDirectory,
                 _config.Images.OutputDirectory);
 
-            async Task<string> GenerateOnceAsync()
+            async Task<string> GenerateAtSizeAsync(int width, int height)
             {
                 using var client =
                     new ImageGenerationClient(new Uri(_config.Images.ServerUrl));
 
                 return await client.GenerateAsync(
                     ImagePrompt.Trim(),
-                    _config.Images.Width,
-                    _config.Images.Height,
+                    width,
+                    height,
                     outputDirectory,
                     _generationCts.Token);
             }
 
-            ImageStatusText =
-                $"Генерация {_config.Images.Width}×{_config.Images.Height} · {model}…";
+            var requestedWidth = _config.Images.Width;
+            var requestedHeight = _config.Images.Height;
+            var attemptSizes = BuildImageFallbackPlan(
+                requestedWidth,
+                requestedHeight);
 
-            string path;
+            string path = string.Empty;
+            var completedWidth = requestedWidth;
+            var completedHeight = requestedHeight;
+            HttpRequestException? lastRecoverableException = null;
 
-            try
+            for (var attemptIndex = 0; attemptIndex < attemptSizes.Count; attemptIndex++)
             {
-                path = await GenerateOnceAsync();
+                var attempt = attemptSizes[attemptIndex];
+                var didRetryThisSize = false;
+
+                while (true)
+                {
+                    try
+                    {
+                        ImageStatusText =
+                            $"Генерация {attempt.Width}×{attempt.Height} · {model}…";
+
+                        path = await GenerateAtSizeAsync(
+                            attempt.Width,
+                            attempt.Height);
+
+                        completedWidth = attempt.Width;
+                        completedHeight = attempt.Height;
+                        lastRecoverableException = null;
+                        break;
+                    }
+                    catch (HttpRequestException ex)
+                        when (IsRecoverableImageBackendFailure(ex))
+                    {
+                        lastRecoverableException = ex;
+
+                        if (!didRetryThisSize)
+                        {
+                            ImageStatusText =
+                                $"Image backend не вернул результат на {attempt.Width}×{attempt.Height} · " +
+                                "перезапускаем image server и повторяем один раз…";
+
+                            _imageServerManager.StopManagedServer();
+
+                            model = await EnsureImageServerWithProfileAsync(
+                                _generationCts.Token);
+
+                            didRetryThisSize = true;
+                            continue;
+                        }
+
+                        break;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(path))
+                    break;
+
+                var hasNextAttempt = attemptIndex + 1 < attemptSizes.Count;
+
+                if (hasNextAttempt)
+                {
+                    var nextAttempt = attemptSizes[attemptIndex + 1];
+
+                    ImageStatusText =
+                        $"Нет результата на {attempt.Width}×{attempt.Height} · " +
+                        $"fallback на {nextAttempt.Width}×{nextAttempt.Height}…";
+
+                    _imageServerManager.StopManagedServer();
+                    model = await EnsureImageServerWithProfileAsync(
+                        _generationCts.Token);
+                }
             }
-            catch (HttpRequestException ex)
-                when (IsRecoverableImageBackendFailure(ex))
+
+            if (string.IsNullOrWhiteSpace(path))
             {
-                // stable-diffusion.cpp can occasionally return
-                // "generate_image returned no results" after a completed
-                // request (for example after CUDA allocation/fragmentation).
-                // Release only the managed image process, never the chat or
-                // embedding CUDA servers, then retry exactly once.
-                ImageStatusText =
-                    "Image backend вернул пустой результат · " +
-                    "перезапускаем image CUDA server и повторяем один раз…";
+                if (lastRecoverableException is not null)
+                    throw lastRecoverableException;
 
-                _imageServerManager.StopManagedServer();
-
-                model = await EnsureImageServerWithProfileAsync(
-                    _generationCts.Token);
-
-                ImageStatusText =
-                    $"Повторная генерация {_config.Images.Width}×{_config.Images.Height} · {model}…";
-
-                path = await GenerateOnceAsync();
+                throw new InvalidOperationException(
+                    "Image generation did not return a result.");
             }
 
             LastImagePath = Path.GetFullPath(path);
 
             ImageStatusText =
-                $"Готово · {Path.GetFileName(path)} · " +
-                $"{_config.Images.Width}×{_config.Images.Height}";
+                completedWidth == requestedWidth && completedHeight == requestedHeight
+                    ? $"Готово · {Path.GetFileName(path)} · {completedWidth}×{completedHeight}"
+                    : $"Готово · {Path.GetFileName(path)} · fallback {completedWidth}×{completedHeight} (запрошено {requestedWidth}×{requestedHeight})";
         }
         catch (OperationCanceledException)
         {
@@ -1005,6 +1058,37 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
         {
             IsGenerating = false;
         }
+    }
+
+    private static List<(int Width, int Height)> BuildImageFallbackPlan(
+        int requestedWidth,
+        int requestedHeight)
+    {
+        var attempts = new List<(int Width, int Height)>
+        {
+            (requestedWidth, requestedHeight)
+        };
+
+        var largestRequestedDimension = Math.Max(
+            requestedWidth,
+            requestedHeight);
+
+        if (largestRequestedDimension >= 1024)
+        {
+            AddFallbackAttempt(attempts, 896, 896);
+            AddFallbackAttempt(attempts, 768, 768);
+        }
+
+        return attempts;
+    }
+
+    private static void AddFallbackAttempt(
+        List<(int Width, int Height)> attempts,
+        int width,
+        int height)
+    {
+        if (!attempts.Any(item => item.Width == width && item.Height == height))
+            attempts.Add((width, height));
     }
 
     private static bool IsRecoverableImageBackendFailure(
