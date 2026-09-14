@@ -66,7 +66,9 @@ public sealed class DiagnosticReportService
                 inferenceEndpoint = "loopback only",
                 apiKeysIncluded = false,
                 modelFilesIncluded = false,
-                knowledgeContentsIncluded = false, rawLogsIncluded = false, systemPromptIncluded = false
+                knowledgeContentsIncluded = false,
+                rawLogsIncluded = false,
+                systemPromptIncluded = false
             }
         };
 
@@ -82,9 +84,9 @@ public sealed class DiagnosticReportService
             config.MaxOutputTokens,
             config.Temperature,
             embeddingsConfigured = config.Embeddings.Enabled && File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Embeddings.ModelPath)),
-            config.Knowledge.PreferVectorSearch,
-            config.Web.Enabled,
-            config.Images.Enabled,
+            preferVectorSearch = config.Knowledge.PreferVectorSearch,
+            webConfigured = config.Web.Enabled,
+            imagesConfigured = config.Images.Enabled,
             systemPrompt = "[omitted]"
         };
         AddJson(archive, "config.sanitized.json", sanitizedConfig);
@@ -126,7 +128,6 @@ public sealed class DiagnosticReportService
         {
             var directory = Path.Combine(_baseDirectory, relative);
             if (!Directory.Exists(directory)) continue;
-            // Do not traverse symbolic links, junctions or arbitrary user folders.
             var cursor = new DirectoryInfo(directory);
             var linked = false;
             while (cursor is not null && cursor.FullName.StartsWith(_baseDirectory, StringComparison.OrdinalIgnoreCase))

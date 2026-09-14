@@ -33,7 +33,7 @@ internal static class Milestone2SelfTests
             files.Add(docx);
             await store.ImportAsync(files, cancellationToken);
             Require(await store.GetDocumentCountAsync(cancellationToken) == 7, "Import all seven formats");
-            Require((await store.SearchAsync("Лазурный", cancellationToken: cancellationToken)).Single().DocumentName == "sample.docx", "DOCX text retrieval");
+            Require((await store.SearchAsync("Лазурный", ct: cancellationToken)).Single().DocumentName == "sample.docx", "DOCX text retrieval");
             await store.ImportAsync([files[0]], cancellationToken);
             Require(await store.GetDocumentCountAsync(cancellationToken) == 7, "Reimport does not duplicate documents");
             var extra = Path.Combine(root, "extra.txt");
@@ -44,7 +44,7 @@ internal static class Milestone2SelfTests
             Require(await new KnowledgeStore(root).GetDocumentCountAsync(cancellationToken) == 7, "Index survives reload");
             await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
             {
-                await store.SearchAsync("Северный", cancellationToken: cancellationToken);
+                await store.SearchAsync("Северный", ct: cancellationToken);
                 await store.ImportAsync([files[0]], cancellationToken);
             }));
             Require(await store.GetDocumentCountAsync(cancellationToken) == 7, "Concurrent reads/imports");
@@ -89,7 +89,6 @@ internal static class Milestone2SelfTests
         }
         finally
         {
-            // The directory was created with a unique name beneath the system temp folder above.
             var full = Path.GetFullPath(root);
             if (full.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase)
                 && Path.GetFileName(full).StartsWith("PocketAI-M2-tests-", StringComparison.Ordinal))
