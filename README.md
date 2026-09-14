@@ -88,3 +88,7 @@ A successful run exits with code `0` and writes `passed: true` to the JSON repor
 This is still Milestone 1. It does **not** yet include RAG, document parsing, persistent chats, encryption, benchmark-based model selection or VRAM-aware autotuning.
 
 See `RUNTIME_SETUP.md`, `BUILD_NOTES.md` and `THIRD_PARTY.md` for implementation details.
+
+
+## Milestone 3
+See `MILESTONE3.md` for PDF, vector RAG, optional web research and local image generation.

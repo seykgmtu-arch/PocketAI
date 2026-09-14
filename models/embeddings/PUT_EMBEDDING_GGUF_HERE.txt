@@ -1,0 +1,1 @@
+Place a dedicated embedding GGUF here as model.gguf. Without it PocketAI uses lexical RAG fallback.

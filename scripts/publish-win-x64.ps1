@@ -36,7 +36,7 @@ try {
     }
 
     Write-Host ''
-    foreach ($item in @('LICENSES', 'assets.lock.json', 'THIRD_PARTY.md', 'MILESTONE2.md')) {
+    foreach ($item in @('LICENSES', 'assets.lock.json', 'THIRD_PARTY.md', 'MILESTONE2.md', 'MILESTONE3.md')) {
         $source = Join-Path $root $item
         if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $dist -Recurse -Force }
     }

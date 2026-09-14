@@ -7,5 +7,27 @@
   "contextSize": 4096,
   "maxOutputTokens": 512,
   "temperature": 0.6,
-  "systemPrompt": "Ты Pocket AI — локальный приватный помощник. Отвечай по существу и на языке пользователя. Для этой тестовой модели работай без режима скрытого рассуждения: /no_think. Не раскрывай скрытые рассуждения; показывай только полезный итоговый ответ."
+  "systemPrompt": "Ты Pocket AI — локальный приватный помощник. Отвечай по существу и на языке пользователя. Для этой тестовой модели работай без режима скрытого рассуждения: /no_think. Не раскрывай скрытые рассуждения; показывай только полезный итоговый ответ.",
+  "embeddings": {
+    "enabled": true,
+    "modelPath": "models/embeddings/model.gguf",
+    "contextSize": 2048
+  },
+  "knowledge": {
+    "preferVectorSearch": true,
+    "topK": 4
+  },
+  "web": {
+    "enabled": false,
+    "maxResults": 5,
+    "maxPagesToRead": 2,
+    "maxCharactersPerPage": 8000
+  },
+  "images": {
+    "enabled": false,
+    "serverUrl": "http://127.0.0.1:7860/",
+    "outputDirectory": "outputs/images",
+    "width": 768,
+    "height": 768
+  }
 }

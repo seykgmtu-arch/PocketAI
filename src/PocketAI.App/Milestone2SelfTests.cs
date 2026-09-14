@@ -66,12 +66,12 @@ internal static class Milestone2SelfTests
             {
                 Require(!viewModel.ApplyModelCommand.CanExecute(null), "Model switching disabled during initialization");
                 var window = new MainWindow(viewModel);
-                Require(window.FindName("PromptBox") is not null && window.FindName("ChatList") is not null, "Milestone 2 XAML loads");
+                Require(window.FindName("PromptBox") is not null && window.FindName("ChatList") is not null, "Milestone 3 XAML loads");
                 window.Close();
             }
             Directory.CreateDirectory(Path.Combine(root, "logs"));
             await File.WriteAllTextAsync(Path.Combine(root, "logs", secret + ".log"), "Authorization: Bearer " + secret, cancellationToken);
-            var diagnostic = await new DiagnosticReportService(root).CreateAsync(config, null, secret, secret, secret, models, 7, cancellationToken);
+            var diagnostic = await new DiagnosticReportService(root).CreateAsync(config, null, secret, secret, secret, models, 7, 0, false, false, cancellationToken);
             using (var archive = ZipFile.OpenRead(diagnostic))
             {
                 Require(archive.GetEntry("hardware.json") is not null, "Diagnostic hardware metadata");

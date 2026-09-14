@@ -31,6 +31,9 @@ public sealed class DiagnosticReportService
         string recentServerOutput,
         IReadOnlyList<LocalModelDescriptor> models,
         int knowledgeDocumentCount,
+        int vectorCount,
+        bool webEnabled,
+        bool imageEnabled,
         CancellationToken cancellationToken = default)
     {
         var outputDirectory = Path.Combine(_baseDirectory, "diagnostics");
@@ -54,6 +57,10 @@ public sealed class DiagnosticReportService
             backend = backendText is "CPU" or "Cpu" ? "CPU" : backendText is "CUDA / GPU" or "Cuda" ? "CUDA" : "unknown",
             status = "Free-form status omitted for privacy",
             knowledgeDocumentCount,
+            vectorCount,
+            webEnabled,
+            imageEnabled,
+            milestone = 3,
             privacy = new
             {
                 inferenceEndpoint = "loopback only",
@@ -74,6 +81,10 @@ public sealed class DiagnosticReportService
             config.ContextSize,
             config.MaxOutputTokens,
             config.Temperature,
+            embeddingsConfigured = config.Embeddings.Enabled && File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Embeddings.ModelPath)),
+            config.Knowledge.PreferVectorSearch,
+            config.Web.Enabled,
+            config.Images.Enabled,
             systemPrompt = "[omitted]"
         };
         AddJson(archive, "config.sanitized.json", sanitizedConfig);
@@ -105,7 +116,7 @@ public sealed class DiagnosticReportService
     private string BuildSafeTree()
     {
         var builder = new StringBuilder("File contents and unrecognized names are omitted.\n");
-        var directories = new[] { "", "runtime/llama/cpu", "runtime/llama/cuda", "models/chat", "logs" };
+        var directories = new[] { "", "runtime/llama/cpu", "runtime/llama/cuda", "models/chat", "models/embeddings", "runtime/image", "outputs/images", "logs" };
         var knownFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "PocketAI.exe", "PocketAI.dll", "PocketAI.deps.json", "PocketAI.runtimeconfig.json",

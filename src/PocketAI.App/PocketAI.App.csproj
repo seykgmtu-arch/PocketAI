@@ -1,26 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <AssemblyName>PocketAI</AssemblyName>
-    <Version>0.2.0</Version>
-    <RootNamespace>PocketAI.App</RootNamespace>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-  </PropertyGroup>
-
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><EnableWindowsTargeting>true</EnableWindowsTargeting><AssemblyName>PocketAI</AssemblyName><Version>0.3.0</Version><RootNamespace>PocketAI.App</RootNamespace><ApplicationManifest>app.manifest</ApplicationManifest></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PocketAI.Core\PocketAI.Core.csproj" />
     <ProjectReference Include="..\PocketAI.Hardware\PocketAI.Hardware.csproj" />
     <ProjectReference Include="..\PocketAI.Inference\PocketAI.Inference.csproj" />
     <ProjectReference Include="..\PocketAI.Knowledge\PocketAI.Knowledge.csproj" />
+    <ProjectReference Include="..\PocketAI.Web\PocketAI.Web.csproj" />
+    <ProjectReference Include="..\PocketAI.Images\PocketAI.Images.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="..\..\pocketai.json" Link="pocketai.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-  </ItemGroup>
+  <ItemGroup><Content Include="..\..\pocketai.json" Link="pocketai.json"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory></Content></ItemGroup>
 </Project>
