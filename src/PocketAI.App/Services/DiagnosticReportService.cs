@@ -8,6 +8,13 @@ using PocketAI.Hardware;
 
 namespace PocketAI.App.Services;
 
+public sealed record RagDiagnosticSnapshot(
+    string Mode,
+    double VectorThreshold,
+    double? TopSimilarity,
+    double? AverageSimilarity,
+    int HitCount);
+
 public sealed class DiagnosticReportService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -23,6 +30,35 @@ public sealed class DiagnosticReportService
         _baseDirectory = Path.GetFullPath(baseDirectory);
     }
 
+    // Compatibility overload used by existing self-tests and older callers.
+    public Task<string> CreateAsync(
+        PocketAiConfig config,
+        HardwareProfile? hardware,
+        string backendText,
+        string statusText,
+        string recentServerOutput,
+        IReadOnlyList<LocalModelDescriptor> models,
+        int knowledgeDocumentCount,
+        int vectorCount,
+        bool webEnabled,
+        bool imageEnabled,
+        CancellationToken cancellationToken = default)
+    {
+        return CreateAsync(
+            config,
+            hardware,
+            backendText,
+            statusText,
+            recentServerOutput,
+            models,
+            knowledgeDocumentCount,
+            vectorCount,
+            webEnabled,
+            imageEnabled,
+            rag: null,
+            cancellationToken);
+    }
+
     public async Task<string> CreateAsync(
         PocketAiConfig config,
         HardwareProfile? hardware,
@@ -34,6 +70,7 @@ public sealed class DiagnosticReportService
         int vectorCount,
         bool webEnabled,
         bool imageEnabled,
+        RagDiagnosticSnapshot? rag,
         CancellationToken cancellationToken = default)
     {
         var outputDirectory = Path.Combine(_baseDirectory, "diagnostics");
@@ -56,16 +93,33 @@ public sealed class DiagnosticReportService
             createdAtLocal = DateTimeOffset.Now,
             appVersion = assembly?.GetName().Version?.ToString() ?? "unknown",
             framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
-            processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
-            operatingSystem = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
-            backend = backendText is "CPU" or "Cpu" ? "CPU" : backendText is "CUDA / GPU" or "Cuda" ? "CUDA" : "unknown",
+            processArchitecture =
+                System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+            operatingSystem =
+                System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            backend = backendText is "CPU" or "Cpu"
+                ? "CPU"
+                : backendText is "CUDA / GPU" or "Cuda"
+                    ? "CUDA"
+                    : "unknown",
             status = "Free-form status omitted for privacy",
             knowledgeDocumentCount,
             vectorCount,
             webEnabled,
             imageEnabled,
-            embeddingProvider = embeddingsConfigured ? "Qwen3-Embedding GGUF via llama.cpp" : "not configured",
-            embeddingStrategy = embeddingsConfigured ? "query=Instruct+Query; documents=plain; pooling=last; similarity=cosine" : "lexical fallback",
+            embeddingProvider = embeddingsConfigured
+                ? "Qwen3-Embedding GGUF via llama.cpp"
+                : "not configured",
+            embeddingStrategy = embeddingsConfigured
+                ? "query=Instruct+Query; documents=plain; pooling=last; similarity=cosine"
+                : "lexical fallback",
+
+            ragModeUsed = rag?.Mode ?? "not-yet-searched",
+            vectorThreshold = rag?.VectorThreshold,
+            lastTopSimilarity = rag?.TopSimilarity,
+            lastAverageSimilarity = rag?.AverageSimilarity,
+            lastHitCount = rag?.HitCount ?? 0,
+
             milestone = 3,
             privacy = new
             {
@@ -73,6 +127,8 @@ public sealed class DiagnosticReportService
                 apiKeysIncluded = false,
                 modelFilesIncluded = false,
                 knowledgeContentsIncluded = false,
+                queryTextIncluded = false,
+                sourceSnippetsIncluded = false,
                 rawLogsIncluded = false,
                 systemPromptIncluded = false
             }
@@ -80,31 +136,53 @@ public sealed class DiagnosticReportService
 
         AddJson(archive, "report.json", report);
         AddJson(archive, "hardware.json", hardware);
-        AddJson(archive, "models.json", models.Select((model, index) => new { id = index + 1, model.SizeBytes, model.LastWriteTimeUtc }));
+        AddJson(
+            archive,
+            "models.json",
+            models.Select(
+                (model, index) =>
+                    new
+                    {
+                        id = index + 1,
+                        model.SizeBytes,
+                        model.LastWriteTimeUtc
+                    }));
 
         var sanitizedConfig = new
         {
-            modelExists = File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.ModelPath)),
-            cpuRuntimeExists = File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Runtime.CpuPath)),
+            modelExists =
+                File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.ModelPath)),
+            cpuRuntimeExists =
+                File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Runtime.CpuPath)),
             config.ContextSize,
             config.MaxOutputTokens,
             config.Temperature,
             embeddingsConfigured,
             embeddingPooling = embeddingsConfigured ? "last" : "n/a",
-            embeddingQueryFormatting = embeddingsConfigured ? "Qwen3 Instruct/Query" : "n/a",
+            embeddingQueryFormatting =
+                embeddingsConfigured ? "Qwen3 Instruct/Query" : "n/a",
             preferVectorSearch = config.Knowledge.PreferVectorSearch,
+            configuredTopK = config.Knowledge.TopK,
+            ragQualityPolicy =
+                "adaptive Top-K; absolute threshold=0.30; relative window=0.08; lexical fallback",
             webConfigured = config.Web.Enabled,
             imagesConfigured = config.Images.Enabled,
             systemPrompt = "[omitted]"
         };
+
         AddJson(archive, "config.sanitized.json", sanitizedConfig);
 
-        AddJson(archive, "logs.summary.json", new
-        {
-            capturedServerCharacters = recentServerOutput.Length,
-            capturedServerLines = recentServerOutput.Count(c => c == '\n'),
-            note = "Raw logs, names and status text are omitted because they may contain keys, prompts or documents."
-        });
+        AddJson(
+            archive,
+            "logs.summary.json",
+            new
+            {
+                capturedServerCharacters = recentServerOutput.Length,
+                capturedServerLines = recentServerOutput.Count(c => c == '\n'),
+                note =
+                    "Raw logs, prompts, queries, source names and document text are omitted."
+            });
+
         AddText(archive, "tree.txt", BuildSafeTree());
         return outputPath;
     }
@@ -119,40 +197,91 @@ public sealed class DiagnosticReportService
     {
         var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
         using var stream = entry.Open();
-        using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        using var writer =
+            new StreamWriter(
+                stream,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
         writer.Write(content);
     }
 
     private string BuildSafeTree()
     {
-        var builder = new StringBuilder("File contents and unrecognized names are omitted.\n");
-        var directories = new[] { "", "runtime/llama/cpu", "runtime/llama/cuda", "models/chat", "models/embeddings", "runtime/image", "outputs/images", "logs" };
-        var knownFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        var builder =
+            new StringBuilder("File contents and unrecognized names are omitted.\n");
+
+        var directories = new[]
         {
-            "PocketAI.exe", "PocketAI.dll", "PocketAI.deps.json", "PocketAI.runtimeconfig.json",
-            "pocketai.json", "assets.lock.json", "llama-server.exe"
+            "",
+            "runtime/llama/cpu",
+            "runtime/llama/cuda",
+            "models/chat",
+            "models/embeddings",
+            "runtime/image",
+            "models/images",
+            "outputs/images",
+            "logs"
         };
+
+        var knownFiles =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "PocketAI.exe",
+                "PocketAI.dll",
+                "PocketAI.deps.json",
+                "PocketAI.runtimeconfig.json",
+                "pocketai.json",
+                "assets.lock.json",
+                "llama-server.exe",
+                "sd-server.exe"
+            };
+
         foreach (var relative in directories)
         {
             var directory = Path.Combine(_baseDirectory, relative);
-            if (!Directory.Exists(directory)) continue;
+
+            if (!Directory.Exists(directory))
+                continue;
+
             var cursor = new DirectoryInfo(directory);
             var linked = false;
-            while (cursor is not null && cursor.FullName.StartsWith(_baseDirectory, StringComparison.OrdinalIgnoreCase))
+
+            while (cursor is not null &&
+                   cursor.FullName.StartsWith(
+                       _baseDirectory,
+                       StringComparison.OrdinalIgnoreCase))
             {
-                linked |= (cursor.Attributes & FileAttributes.ReparsePoint) != 0;
+                linked |=
+                    (cursor.Attributes & FileAttributes.ReparsePoint) != 0;
                 cursor = cursor.Parent;
             }
-            if (linked) continue;
+
+            if (linked)
+                continue;
+
             builder.AppendLine(relative + "/");
+
             foreach (var path in Directory.EnumerateFiles(directory).Take(1000))
             {
                 var info = new FileInfo(path);
-                if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                var name = knownFiles.Contains(info.Name) ? info.Name : "[name omitted]";
-                builder.Append("  ").Append(name).Append(" | ").Append(info.Length).AppendLine(" bytes");
+
+                if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                    continue;
+
+                var name =
+                    knownFiles.Contains(info.Name)
+                        ? info.Name
+                        : "[name omitted]";
+
+                builder
+                    .Append("  ")
+                    .Append(name)
+                    .Append(" | ")
+                    .Append(info.Length)
+                    .AppendLine(" bytes");
             }
         }
+
         return builder.ToString();
     }
 }
