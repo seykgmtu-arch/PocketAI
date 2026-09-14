@@ -358,6 +358,11 @@ public sealed class ImageServerManager : IDisposable
         }
     }
 
+    public void StopManagedServer()
+    {
+        StopLocalProcess();
+    }
+
     private void StopLocalProcess()
     {
         Process? process;

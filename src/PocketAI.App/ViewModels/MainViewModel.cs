@@ -376,6 +376,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             MemoryText = $"{GiB(_hardware.TotalMemoryBytes):0.#} GB RAM · свободно {GiB(_hardware.AvailableMemoryBytes):0.#} GB";
             ImageHardwareText = BuildImageHardwareSummary();
 
+            // Older installations may still have embeddings.contextSize=512
+            // in pocketai.json. Qwen3 chunks can exceed that even when the
+            // current default is larger. Upgrade the persisted value safely.
+            if (_config.Embeddings.ContextSize < 2048)
+            {
+                _config.Embeddings.ContextSize = 2048;
+                ConfigLoader.Save(_baseDirectory, _config);
+            }
+
             await RefreshKnowledgeStatusAsync();
 
             var session = await _serverManager.StartAsync(
@@ -927,22 +936,54 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
             var model = await EnsureImageServerWithProfileAsync(
                 _generationCts.Token);
 
-            ImageStatusText =
-                $"Генерация {_config.Images.Width}×{_config.Images.Height} · {model}…";
-
             var outputDirectory = ConfigLoader.ResolvePath(
                 _baseDirectory,
                 _config.Images.OutputDirectory);
 
-            using var client =
-                new ImageGenerationClient(new Uri(_config.Images.ServerUrl));
+            async Task<string> GenerateOnceAsync()
+            {
+                using var client =
+                    new ImageGenerationClient(new Uri(_config.Images.ServerUrl));
 
-            var path = await client.GenerateAsync(
-                ImagePrompt.Trim(),
-                _config.Images.Width,
-                _config.Images.Height,
-                outputDirectory,
-                _generationCts.Token);
+                return await client.GenerateAsync(
+                    ImagePrompt.Trim(),
+                    _config.Images.Width,
+                    _config.Images.Height,
+                    outputDirectory,
+                    _generationCts.Token);
+            }
+
+            ImageStatusText =
+                $"Генерация {_config.Images.Width}×{_config.Images.Height} · {model}…";
+
+            string path;
+
+            try
+            {
+                path = await GenerateOnceAsync();
+            }
+            catch (HttpRequestException ex)
+                when (IsRecoverableImageBackendFailure(ex))
+            {
+                // stable-diffusion.cpp can occasionally return
+                // "generate_image returned no results" after a completed
+                // request (for example after CUDA allocation/fragmentation).
+                // Release only the managed image process, never the chat or
+                // embedding CUDA servers, then retry exactly once.
+                ImageStatusText =
+                    "Image backend вернул пустой результат · " +
+                    "перезапускаем image CUDA server и повторяем один раз…";
+
+                _imageServerManager.StopManagedServer();
+
+                model = await EnsureImageServerWithProfileAsync(
+                    _generationCts.Token);
+
+                ImageStatusText =
+                    $"Повторная генерация {_config.Images.Width}×{_config.Images.Height} · {model}…";
+
+                path = await GenerateOnceAsync();
+            }
 
             LastImagePath = Path.GetFullPath(path);
 
@@ -963,6 +1004,20 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
         {
             IsGenerating = false;
         }
+    }
+
+    private static bool IsRecoverableImageBackendFailure(
+        HttpRequestException exception)
+    {
+        var message = exception.GetBaseException().Message;
+
+        return
+            message.Contains(
+                "generate_image returned no results",
+                StringComparison.OrdinalIgnoreCase) ||
+            message.Contains(
+                "generate_image returned empty results",
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private void OpenImagesFolder()
