@@ -14,8 +14,8 @@ public sealed record VectorChunk(string DocumentId, int ChunkIndex, float[] Vect
 
 public sealed class KnowledgeStore
 {
-    private const int ChunkSize = 1200;
-    private const int ChunkOverlap = 160;
+    private const int ChunkSize = 900;
+    private const int ChunkOverlap = 120;
     private readonly string _storeDirectory;
     private readonly string _indexPath;
     private readonly string _vectorPath;
