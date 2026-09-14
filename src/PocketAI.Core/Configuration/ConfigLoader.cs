@@ -8,7 +8,9 @@ public static class ConfigLoader
     {
         PropertyNameCaseInsensitive = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
+        AllowTrailingCommas = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true
     };
 
     public static PocketAiConfig Load(string baseDirectory)
@@ -26,6 +28,18 @@ public static class ConfigLoader
 
         Validate(config);
         return config;
+    }
+
+    public static void Save(string baseDirectory, PocketAiConfig config)
+    {
+        Validate(config);
+
+        var path = Path.Combine(baseDirectory, "pocketai.json");
+        var tempPath = path + ".tmp";
+        var json = JsonSerializer.Serialize(config, JsonOptions);
+
+        File.WriteAllText(tempPath, json);
+        File.Move(tempPath, path, overwrite: true);
     }
 
     public static string ResolvePath(string baseDirectory, string relativeOrAbsolutePath)

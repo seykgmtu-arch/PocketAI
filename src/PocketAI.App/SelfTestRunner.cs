@@ -25,6 +25,8 @@ internal static class SelfTestRunner
 
         try
         {
+            await Milestone2SelfTests.RunAsync(cancellationToken);
+            result["milestone2ChecksPassed"] = true;
             var hardware = await new HardwareProbe().ProbeAsync(cancellationToken);
             if (forceCpu)
                 hardware = hardware with { Gpus = Array.Empty<GpuInfo>() };

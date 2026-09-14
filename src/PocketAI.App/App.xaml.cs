@@ -21,6 +21,7 @@ public partial class App : Application
 
             if (e.Args.Any(a => a.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
             {
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 var outputPath = GetArgValue(e.Args, "--self-test-output")
                     ?? Path.Combine(baseDirectory, "smoke-test-pocketai.json");
                 var forceCpu = e.Args.Any(a => a.Equals("--force-cpu", StringComparison.OrdinalIgnoreCase));

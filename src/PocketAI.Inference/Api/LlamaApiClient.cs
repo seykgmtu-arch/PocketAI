@@ -32,13 +32,23 @@ public sealed class LlamaApiClient : IDisposable
     public async Task StreamChatAsync(
         IReadOnlyList<ChatMessage> history,
         Func<string, Task> onText,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? knowledgeContext = null)
     {
+        var systemContent = string.IsNullOrWhiteSpace(knowledgeContext)
+            ? _config.SystemPrompt
+            : _config.SystemPrompt + "\n\n" + knowledgeContext;
+
         var messages = new List<object>
         {
-            new { role = "system", content = _config.SystemPrompt }
+            new { role = "system", content = systemContent }
         };
-        messages.AddRange(history.Select(m => (object)new { role = m.Role, content = m.Content }));
+
+        messages.AddRange(history.Select(m => (object)new
+        {
+            role = m.Role,
+            content = m.Content
+        }));
 
         var body = new
         {

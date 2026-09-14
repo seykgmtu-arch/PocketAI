@@ -5,6 +5,7 @@
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>PocketAI</AssemblyName>
+    <Version>0.2.0</Version>
     <RootNamespace>PocketAI.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
@@ -13,6 +14,7 @@
     <ProjectReference Include="..\PocketAI.Core\PocketAI.Core.csproj" />
     <ProjectReference Include="..\PocketAI.Hardware\PocketAI.Hardware.csproj" />
     <ProjectReference Include="..\PocketAI.Inference\PocketAI.Inference.csproj" />
+    <ProjectReference Include="..\PocketAI.Knowledge\PocketAI.Knowledge.csproj" />
   </ItemGroup>
 
   <ItemGroup>
