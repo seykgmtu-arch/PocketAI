@@ -28,7 +28,7 @@ internal static class Milestone2SelfTests
             using (var zip = ZipFile.Open(docx, ZipArchiveMode.Create))
             {
                 using var writer = new StreamWriter(zip.CreateEntry("word/document.xml").Open());
-                writer.Write("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>Маяк Лазурный расположен на острове.</w:t></w:r></w:p></w:body></w:document>");
+                writer.Write("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>Маяк Лазурный расположен на удалённом острове и используется как основной навигационный ориентир для судов.</w:t></w:r></w:p></w:body></w:document>");
             }
             files.Add(docx);
             await store.ImportAsync(files, cancellationToken);
