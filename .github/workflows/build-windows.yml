@@ -14,7 +14,8 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
@@ -28,7 +29,7 @@ jobs:
         run: dotnet build .\PocketAI.sln -c Release --no-restore
 
       - name: Cache downloaded AI assets
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache/downloads
           key: pocketai-assets-b10941-qwen3-0.6b-q8
@@ -53,13 +54,222 @@ jobs:
         shell: pwsh
         run: .\scripts\smoke-test-pocketai.ps1
 
-      - name: Create release archive
+      # ------------------------------------------------------------
+      # Маленький PATCH.
+      # Берём только исполняемые файлы PocketAI и зависимости.
+      #
+      # НЕ включаем:
+      #   pocketai.json
+      #   models/
+      #   runtime/llama/
+      #   knowledge/
+      #   outputs/
+      #   logs/
+      #   diagnostics/
+      # ------------------------------------------------------------
+
+      - name: Create lightweight patch archive
         shell: pwsh
         run: |
-          Compress-Archive -Path .\dist\PocketAI\* -DestinationPath .\dist\PocketAI-win-x64.zip -CompressionLevel Optimal
+          $source = ".\dist\PocketAI"
+          $patchDir = ".\dist\PocketAI-patch"
+          $patchZip = ".\dist\PocketAI-win-x64-patch.zip"
 
-      - name: Upload PocketAI artifact
-        uses: actions/upload-artifact@v4
+          Write-Host "Creating lightweight PocketAI patch..."
+
+          Remove-Item $patchDir `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Remove-Item $patchZip `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          New-Item `
+            -ItemType Directory `
+            -Path $patchDir `
+            -Force | Out-Null
+
+          # ------------------------------------------------------
+          # Основной EXE
+          # ------------------------------------------------------
+
+          $exe = Join-Path $source "PocketAI.exe"
+
+          if (-not (Test-Path $exe)) {
+            throw "PocketAI.exe was not found in $source"
+          }
+
+          Copy-Item `
+            $exe `
+            $patchDir `
+            -Force
+
+          # ------------------------------------------------------
+          # Все DLL из корня опубликованного приложения.
+          #
+          # Сюда входят:
+          # PocketAI.dll
+          # PocketAI.Core.dll
+          # PocketAI.Hardware.dll
+          # PocketAI.Inference.dll
+          # PocketAI.Knowledge.dll
+          # PocketAI.Web.dll
+          # PocketAI.Images.dll
+          # DLL .NET runtime
+          # сторонние DLL
+          # ------------------------------------------------------
+
+          Get-ChildItem `
+            -Path $source `
+            -Filter "*.dll" `
+            -File |
+          ForEach-Object {
+            Copy-Item `
+              $_.FullName `
+              $patchDir `
+              -Force
+          }
+
+          # ------------------------------------------------------
+          # .NET dependency description
+          # ------------------------------------------------------
+
+          Get-ChildItem `
+            -Path $source `
+            -Filter "*.deps.json" `
+            -File |
+          ForEach-Object {
+            Copy-Item `
+              $_.FullName `
+              $patchDir `
+              -Force
+          }
+
+          # ------------------------------------------------------
+          # .NET runtime configuration
+          # ------------------------------------------------------
+
+          Get-ChildItem `
+            -Path $source `
+            -Filter "*.runtimeconfig.json" `
+            -File |
+          ForEach-Object {
+            Copy-Item `
+              $_.FullName `
+              $patchDir `
+              -Force
+          }
+
+          # ------------------------------------------------------
+          # Native runtime assets NuGet/.NET.
+          #
+          # ВАЖНО:
+          # runtimes/ != runtime/llama/
+          #
+          # runtime/llama сюда НЕ копируется.
+          # ------------------------------------------------------
+
+          $nativeRuntimes = Join-Path $source "runtimes"
+
+          if (Test-Path $nativeRuntimes) {
+            Copy-Item `
+              $nativeRuntimes `
+              (Join-Path $patchDir "runtimes") `
+              -Recurse `
+              -Force
+          }
+
+          # ------------------------------------------------------
+          # Проверка, что ничего большого/пользовательского
+          # случайно не попало в patch
+          # ------------------------------------------------------
+
+          $forbidden = @(
+            "pocketai.json",
+            "models",
+            "runtime",
+            "knowledge",
+            "outputs",
+            "logs",
+            "diagnostics"
+          )
+
+          foreach ($item in $forbidden) {
+            $forbiddenPath = Join-Path $patchDir $item
+
+            if (Test-Path $forbiddenPath) {
+              throw "Forbidden item found in patch: $item"
+            }
+          }
+
+          # ------------------------------------------------------
+          # Показываем состав PATCH в логе Actions
+          # ------------------------------------------------------
+
+          Write-Host ""
+          Write-Host "PATCH CONTENTS:"
+          Write-Host "---------------"
+
+          Get-ChildItem `
+            $patchDir `
+            -Recurse `
+            -File |
+          ForEach-Object {
+            $relative = $_.FullName.Substring(
+              $patchDir.Length
+            ).TrimStart('\')
+
+            Write-Host "$relative  $($_.Length) bytes"
+          }
+
+          # ------------------------------------------------------
+          # Создаём ZIP
+          # ------------------------------------------------------
+
+          Compress-Archive `
+            -Path "$patchDir\*" `
+            -DestinationPath $patchZip `
+            -CompressionLevel Optimal `
+            -Force
+
+          $zipInfo = Get-Item $patchZip
+
+          Write-Host ""
+          Write-Host "Lightweight patch created:"
+          Write-Host $zipInfo.FullName
+          Write-Host "Size: $($zipInfo.Length) bytes"
+
+      - name: Upload lightweight PocketAI patch
+        uses: actions/upload-artifact@v6
+        with:
+          name: PocketAI-win-x64-patch
+          path: dist/PocketAI-win-x64-patch.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      # ------------------------------------------------------------
+      # Полная сборка — для новой установки PocketAI
+      # ------------------------------------------------------------
+
+      - name: Create full release archive
+        shell: pwsh
+        run: |
+          $zip = ".\dist\PocketAI-win-x64.zip"
+
+          Remove-Item `
+            $zip `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Compress-Archive `
+            -Path .\dist\PocketAI\* `
+            -DestinationPath $zip `
+            -CompressionLevel Optimal
+
+      - name: Upload full PocketAI artifact
+        uses: actions/upload-artifact@v6
         with:
           name: PocketAI-win-x64
           path: |
