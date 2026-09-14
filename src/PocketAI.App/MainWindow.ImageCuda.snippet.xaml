@@ -1,0 +1,38 @@
+<!-- =======================
+MainWindow.ImageCuda.snippet.xaml
+Вставить во вкладку "Изображения" между статусом и большим TextBox.
+======================= -->
+
+<!-- Добавить этот блок -->
+<Border Grid.Row="1" Background="#101A2E" CornerRadius="10" Padding="10" Margin="0,10,0,10">
+    <StackPanel>
+        <TextBlock Text="{Binding ImageHardwareText}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+        <TextBlock Text="{Binding ImageRuntimeText}" Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}"/>
+        <TextBlock Text="{Binding ImageProfileText}" Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}"/>
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+            <TextBlock Text="Профиль: " VerticalAlignment="Center"/>
+            <ComboBox Width="220"
+                      ItemsSource="{Binding ImageProfiles}"
+                      SelectedItem="{Binding SelectedImageProfile}"
+                      DisplayMemberPath="Name"/>
+        </StackPanel>
+    </StackPanel>
+</Border>
+
+<!-- Затем существующие номера Grid.Row сместить:
+старый TextBlock-инструкцию -> Grid.Row="2"
+старый TextBox prompt -> Grid.Row="3"
+старый блок кнопок -> Grid.Row="4"
+старый блок предпросмотра -> Grid.Row="5"
+
+И в корневом Grid вкладки "Изображения" нужно добавить ещё одну строку:
+<RowDefinition Height="Auto"/>
+
+Если хотите, итоговая последовательность строк будет такой:
+Row 0: Заголовок + чекбокс + статус
+Row 1: hardware/runtime/profile
+Row 2: поясняющий текст
+Row 3: prompt TextBox
+Row 4: кнопки
+Row 5: preview
+-->
