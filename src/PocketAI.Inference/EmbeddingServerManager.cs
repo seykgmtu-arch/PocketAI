@@ -94,6 +94,8 @@ public sealed class EmbeddingServerManager : IDisposable
             "--offline",
             "--embedding",
             "--pooling", "mean",
+            "--batch-size", "1024",
+            "--ubatch-size", "1024",
             "--n-gpu-layers", backend == BackendKind.Cuda ? "all" : "0"
         })
         {
