@@ -1,0 +1,13 @@
+PocketAI local image runtime (CUDA)
+
+Place the Windows CUDA build of stable-diffusion.cpp here.
+
+Required:
+- sd-server.exe
+- all DLL files shipped with that build
+
+Expected path:
+runtime\image\cuda\sd-server.exe
+
+ImageEngineManager automatically selects this backend when an NVIDIA GPU is detected.
+If startup fails and the CPU runtime exists, PocketAI falls back to CPU automatically.

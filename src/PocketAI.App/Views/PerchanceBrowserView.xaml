@@ -1,0 +1,108 @@
+<UserControl x:Class="PocketAI.App.Views.PerchanceBrowserView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+             Background="Transparent">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Padding="10"
+                Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="0"
+                        Content="←"
+                        Click="Back_OnClick"
+                        Padding="11,7"
+                        Margin="0,0,6,0"/>
+                <Button Grid.Column="1"
+                        Content="→"
+                        Click="Forward_OnClick"
+                        Padding="11,7"
+                        Margin="0,0,6,0"/>
+                <Button Grid.Column="2"
+                        Content="⟳"
+                        Click="Reload_OnClick"
+                        Padding="11,7"
+                        Margin="0,0,6,0"/>
+                <Button Grid.Column="3"
+                        Content="Домой"
+                        Click="Home_OnClick"
+                        Padding="11,7"
+                        Margin="0,0,6,0"/>
+                <Button Grid.Column="4"
+                        Content="В браузере"
+                        Click="OpenExternal_OnClick"
+                        Padding="11,7"/>
+
+                <TextBlock Grid.Column="5"
+                           Text="https://perchance.org/ai-drawing-generator"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           TextTrimming="CharacterEllipsis"
+                           Margin="14,0"/>
+
+                <CheckBox x:Name="AutoCaptureCheckBox"
+                          Grid.Column="6"
+                          Content="Автосохранение"
+                          IsChecked="False"
+                          VerticalAlignment="Center"
+                          Margin="0,0,10,0"
+                          Checked="AutoCapture_OnChanged"
+                          Unchecked="AutoCapture_OnChanged"/>
+
+                <Button Grid.Column="7"
+                        Content="Папка"
+                        Click="OpenFolder_OnClick"
+                        Background="#334155"
+                        Padding="11,7"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Background="#101A2E"
+                CornerRadius="9"
+                Padding="9"
+                Margin="0,0,0,8">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="ONLINE · "
+                           FontWeight="SemiBold"
+                           Foreground="#93C5FD"/>
+                <TextBlock x:Name="StatusText"
+                           Text="Подготовка WebView2…"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Padding="1">
+            <wv2:WebView2 x:Name="Browser"
+                          DefaultBackgroundColor="#FFFFFF"/>
+        </Border>
+    </Grid>
+</UserControl>

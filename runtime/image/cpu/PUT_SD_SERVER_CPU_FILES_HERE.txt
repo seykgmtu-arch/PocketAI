@@ -1,0 +1,10 @@
+PocketAI local image runtime (CPU)
+
+Place the Windows CPU build of stable-diffusion.cpp here.
+
+Required:
+- sd-server.exe
+- all DLL files shipped with that build
+
+Expected path:
+runtime\image\cpu\sd-server.exe

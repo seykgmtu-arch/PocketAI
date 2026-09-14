@@ -1,0 +1,13 @@
+PocketAI local image models
+
+Place at least one compatible stable-diffusion.cpp model in this folder.
+
+Recognized by the existing PocketAI ImageServerManager:
+- *.safetensors
+- *.ckpt
+- *.gguf
+
+For profile matching, filenames containing strings such as:
+- sd15 / sd-1.5 / v1-5 / 1.5
+- sdxl / xl-base / xl_base
+are preferred automatically.
