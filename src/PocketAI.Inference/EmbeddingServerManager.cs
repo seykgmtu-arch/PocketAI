@@ -71,6 +71,7 @@ public sealed class EmbeddingServerManager : IDisposable
         ClearRecentOutput();
         AppendLog($"Starting embedding server. Backend={backend}, Port={port}");
         AppendLog($"Model={Path.GetFileName(model)}, Context={_config.Embeddings.ContextSize}");
+        AppendLog("Embedding strategy=Qwen3 retrieval; Pooling=last; Query=Instruct+Query; Documents=plain text");
 
         var psi = new ProcessStartInfo
         {
@@ -93,7 +94,7 @@ public sealed class EmbeddingServerManager : IDisposable
             "--no-webui",
             "--offline",
             "--embedding",
-            "--pooling", "mean",
+            "--pooling", "last",
             "--batch-size", "1024",
             "--ubatch-size", "1024",
             "--n-gpu-layers", backend == BackendKind.Cuda ? "all" : "0"

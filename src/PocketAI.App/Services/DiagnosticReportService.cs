@@ -47,6 +47,10 @@ public sealed class DiagnosticReportService
         using var archive = new ZipArchive(fileStream, ZipArchiveMode.Create, leaveOpen: false);
 
         var assembly = Assembly.GetEntryAssembly();
+        var embeddingsConfigured =
+            config.Embeddings.Enabled &&
+            File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Embeddings.ModelPath));
+
         var report = new
         {
             createdAtLocal = DateTimeOffset.Now,
@@ -60,6 +64,8 @@ public sealed class DiagnosticReportService
             vectorCount,
             webEnabled,
             imageEnabled,
+            embeddingProvider = embeddingsConfigured ? "Qwen3-Embedding GGUF via llama.cpp" : "not configured",
+            embeddingStrategy = embeddingsConfigured ? "query=Instruct+Query; documents=plain; pooling=last; similarity=cosine" : "lexical fallback",
             milestone = 3,
             privacy = new
             {
@@ -83,7 +89,9 @@ public sealed class DiagnosticReportService
             config.ContextSize,
             config.MaxOutputTokens,
             config.Temperature,
-            embeddingsConfigured = config.Embeddings.Enabled && File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Embeddings.ModelPath)),
+            embeddingsConfigured,
+            embeddingPooling = embeddingsConfigured ? "last" : "n/a",
+            embeddingQueryFormatting = embeddingsConfigured ? "Qwen3 Instruct/Query" : "n/a",
             preferVectorSearch = config.Knowledge.PreferVectorSearch,
             webConfigured = config.Web.Enabled,
             imagesConfigured = config.Images.Enabled,
