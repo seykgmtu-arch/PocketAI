@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net;
 
 namespace PocketAI.Images;
 
@@ -13,12 +12,24 @@ public enum ImageRuntimeBackend
 public sealed class ImageProfile
 {
     public static readonly ImageProfile Sd15Fast512 =
-        new("SD 1.5 Fast 512", 512, 512, new[] { "sd15", "sd-1.5", "v1-5" });
+        new(
+            "SD 1.5 Fast 512",
+            512,
+            512,
+            new[] { "sd15", "sd-1.5", "v1-5", "1.5" });
 
     public static readonly ImageProfile Sdxl1024 =
-        new("SDXL 1024", 1024, 1024, new[] { "sdxl" });
+        new(
+            "SDXL 1024",
+            1024,
+            1024,
+            new[] { "sdxl", "xl-base", "xl_base" });
 
-    public ImageProfile(string name, int width, int height, IReadOnlyList<string> preferredKeywords)
+    public ImageProfile(
+        string name,
+        int width,
+        int height,
+        IReadOnlyList<string> preferredKeywords)
     {
         Name = name;
         Width = width;
@@ -46,6 +57,7 @@ public sealed class ImageServerManager : IDisposable
 {
     private readonly string _baseDirectory;
     private readonly object _sync = new();
+
     private Process? _process;
 
     public ImageServerManager(string baseDirectory)
@@ -63,14 +75,37 @@ public sealed class ImageServerManager : IDisposable
         var candidates = preferCuda
             ? new[]
             {
-                Path.Combine(_baseDirectory, "runtime", "image", "cuda", "sd-server.exe"),
-                Path.Combine(_baseDirectory, "runtime", "image", "sd-server.exe"),
-                Path.Combine(_baseDirectory, "runtime", "image", "cpu", "sd-server.exe")
+                Path.Combine(
+                    _baseDirectory,
+                    "runtime",
+                    "image",
+                    "cuda",
+                    "sd-server.exe"),
+                Path.Combine(
+                    _baseDirectory,
+                    "runtime",
+                    "image",
+                    "sd-server.exe"),
+                Path.Combine(
+                    _baseDirectory,
+                    "runtime",
+                    "image",
+                    "cpu",
+                    "sd-server.exe")
             }
             : new[]
             {
-                Path.Combine(_baseDirectory, "runtime", "image", "cpu", "sd-server.exe"),
-                Path.Combine(_baseDirectory, "runtime", "image", "sd-server.exe")
+                Path.Combine(
+                    _baseDirectory,
+                    "runtime",
+                    "image",
+                    "cpu",
+                    "sd-server.exe"),
+                Path.Combine(
+                    _baseDirectory,
+                    "runtime",
+                    "image",
+                    "sd-server.exe")
             };
 
         return candidates.FirstOrDefault(File.Exists);
@@ -81,9 +116,10 @@ public sealed class ImageServerManager : IDisposable
         if (!Directory.Exists(ImageModelsDirectory))
             return null;
 
-        var supported = new HashSet<string>(
-            new[] { ".safetensors", ".ckpt", ".gguf" },
-            StringComparer.OrdinalIgnoreCase);
+        var supported =
+            new HashSet<string>(
+                new[] { ".safetensors", ".ckpt", ".gguf" },
+                StringComparer.OrdinalIgnoreCase);
 
         var files = Directory
             .EnumerateFiles(ImageModelsDirectory)
@@ -93,11 +129,14 @@ public sealed class ImageServerManager : IDisposable
 
         foreach (var keyword in profile.PreferredKeywords)
         {
-            var hit = files.FirstOrDefault(path =>
-                Path.GetFileName(path).Contains(keyword, StringComparison.OrdinalIgnoreCase));
+            var match = files.FirstOrDefault(
+                path =>
+                    Path.GetFileName(path).Contains(
+                        keyword,
+                        StringComparison.OrdinalIgnoreCase));
 
-            if (!string.IsNullOrWhiteSpace(hit))
-                return hit;
+            if (!string.IsNullOrWhiteSpace(match))
+                return match;
         }
 
         return files.FirstOrDefault();
@@ -111,72 +150,117 @@ public sealed class ImageServerManager : IDisposable
         IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
-        // 1) If an external or already-running server is already reachable,
-        //    reuse it and do not start another CUDA server.
+        if (!serverUri.IsLoopback)
+        {
+            if (await IsServerAliveAsync(serverUri, ct))
+            {
+                var external = CreateExternalSession(
+                    serverUri,
+                    preferCuda);
+
+                CurrentSession = external;
+                progress?.Report("Используем внешний image server");
+                return external;
+            }
+
+            throw new InvalidOperationException(
+                "Внешний image server недоступен.");
+        }
+
+        var desiredRuntime = ResolveRuntimePath(preferCuda);
+        var desiredModel = ResolveModel(profile);
+
+        if (IsLocalProcessRunning() && CurrentSession is not null)
+        {
+            var sameRuntime =
+                desiredRuntime is not null &&
+                CurrentSession.RuntimePath.Equals(
+                    desiredRuntime,
+                    StringComparison.OrdinalIgnoreCase);
+
+            var sameModel =
+                desiredModel is not null &&
+                CurrentSession.ModelPath.Equals(
+                    desiredModel,
+                    StringComparison.OrdinalIgnoreCase);
+
+            var sameUri =
+                CurrentSession.ServerUri == serverUri;
+
+            if (sameRuntime && sameModel && sameUri)
+            {
+                if (!await IsServerAliveAsync(serverUri, ct))
+                    await WaitForServerAsync(serverUri, ct);
+
+                progress?.Report(
+                    "Используем уже запущенный локальный image server");
+
+                return CurrentSession with
+                {
+                    ReusedExistingServer = true
+                };
+            }
+
+            progress?.Report(
+                "Переключаем image profile без запуска второго CUDA server…");
+
+            StopLocalProcess();
+            await WaitUntilServerStopsAsync(serverUri, ct);
+        }
+
+        // A server is already reachable, but it is not our local managed
+        // process. Reuse it instead of creating a second GPU server.
         if (await IsServerAliveAsync(serverUri, ct))
         {
-            var reused = new ImageServerSession(
+            var external = CreateExternalSession(
                 serverUri,
-                RuntimePath: CurrentSession?.RuntimePath ?? "(external)",
-                ModelPath: CurrentSession?.ModelPath ?? "(external)",
-                Backend: CurrentSession?.Backend ?? (preferCuda ? ImageRuntimeBackend.Cuda : ImageRuntimeBackend.Cpu),
-                ModelLabel: CurrentSession?.ModelLabel ?? "(external server)",
-                ReusedExistingServer: true);
+                preferCuda);
 
-            CurrentSession = reused;
-            progress?.Report("Используем уже доступный image server");
-            return reused;
+            CurrentSession = external;
+            progress?.Report(
+                "Используем уже доступный image server; второй CUDA server не запускается");
+
+            return external;
         }
 
-        // 2) If our own local process is already alive, wait for it instead of spawning another one.
-        lock (_sync)
+        if (desiredRuntime is null)
         {
-            if (_process is { HasExited: false } && CurrentSession is not null)
-            {
-                progress?.Report("Локальный image server уже запущен");
-            }
+            throw new FileNotFoundException(
+                "sd-server.exe не найден. Для RTX/CUDA ожидается " +
+                "runtime\\image\\cuda\\sd-server.exe.");
         }
 
-        if (_process is { HasExited: false } && CurrentSession is not null)
+        if (desiredModel is null)
         {
-            await WaitForServerAsync(serverUri, ct);
-            return CurrentSession with { ReusedExistingServer = true };
+            throw new FileNotFoundException(
+                $"Image-модель для профиля «{profile.Name}» не найдена " +
+                "в models\\images.");
         }
 
-        // 3) Start local process only if no reachable server exists.
-        var runtime = ResolveRuntimePath(preferCuda)
-            ?? throw new FileNotFoundException("sd-server.exe не найден ни в CUDA, ни в CPU runtime layout.");
+        var backend = DetectBackend(desiredRuntime);
 
-        var backend = runtime.Contains(Path.DirectorySeparatorChar + "cuda" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            ? ImageRuntimeBackend.Cuda
-            : runtime.Contains(Path.DirectorySeparatorChar + "cpu" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                ? ImageRuntimeBackend.Cpu
-                : (preferCuda ? ImageRuntimeBackend.Cuda : ImageRuntimeBackend.Cpu);
-
-        var model = ResolveModel(profile)
-            ?? throw new FileNotFoundException("Image-модель не найдена в models\\images.");
-
-        progress?.Report($"Запуск {backend} image server · {Path.GetFileName(model)}");
+        progress?.Report(
+            $"Запуск {backend} image server · {Path.GetFileName(desiredModel)}");
 
         var psi = new ProcessStartInfo
         {
-            FileName = runtime,
-            WorkingDirectory = Path.GetDirectoryName(runtime)!,
+            FileName = desiredRuntime,
+            WorkingDirectory = Path.GetDirectoryName(desiredRuntime)!,
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
 
-        foreach (var arg in new[]
+        foreach (var argument in new[]
         {
             "--listen-ip", "127.0.0.1",
             "--listen-port", serverUri.Port.ToString(),
-            "-m", model,
+            "-m", desiredModel,
             "--threads", Math.Max(1, threads).ToString()
         })
         {
-            psi.ArgumentList.Add(arg);
+            psi.ArgumentList.Add(argument);
         }
 
         var process = new Process
@@ -185,8 +269,13 @@ public sealed class ImageServerManager : IDisposable
             EnableRaisingEvents = true
         };
 
+        // Drain output pipes so the server cannot block on full buffers.
+        process.OutputDataReceived += (_, _) => { };
+        process.ErrorDataReceived += (_, _) => { };
+
         if (!process.Start())
-            throw new InvalidOperationException("Не удалось запустить sd-server.exe.");
+            throw new InvalidOperationException(
+                "Не удалось запустить sd-server.exe.");
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -194,21 +283,115 @@ public sealed class ImageServerManager : IDisposable
         lock (_sync)
         {
             _process = process;
-            CurrentSession = new ImageServerSession(
-                serverUri,
-                runtime,
-                model,
-                backend,
-                Path.GetFileName(model),
-                ReusedExistingServer: false);
+
+            CurrentSession =
+                new ImageServerSession(
+                    serverUri,
+                    desiredRuntime,
+                    desiredModel,
+                    backend,
+                    Path.GetFileName(desiredModel),
+                    ReusedExistingServer: false);
         }
 
-        await WaitForServerAsync(serverUri, ct);
-        progress?.Report($"Image server готов · {backend} · {Path.GetFileName(model)}");
+        try
+        {
+            await WaitForServerAsync(serverUri, ct);
+        }
+        catch
+        {
+            StopLocalProcess();
+            throw;
+        }
+
+        progress?.Report(
+            $"Image server готов · {backend} · " +
+            $"{Path.GetFileName(desiredModel)}");
+
         return CurrentSession!;
     }
 
-    private static async Task<bool> IsServerAliveAsync(Uri serverUri, CancellationToken ct)
+    private ImageServerSession CreateExternalSession(
+        Uri serverUri,
+        bool preferCuda)
+    {
+        return new ImageServerSession(
+            serverUri,
+            RuntimePath: "(external)",
+            ModelPath: "(external)",
+            Backend: ImageRuntimeBackend.Unknown,
+            ModelLabel: "(external server)",
+            ReusedExistingServer: true);
+    }
+
+    private static ImageRuntimeBackend DetectBackend(
+        string runtimePath)
+    {
+        var cudaMarker =
+            Path.DirectorySeparatorChar +
+            "cuda" +
+            Path.DirectorySeparatorChar;
+
+        var cpuMarker =
+            Path.DirectorySeparatorChar +
+            "cpu" +
+            Path.DirectorySeparatorChar;
+
+        if (runtimePath.Contains(
+                cudaMarker,
+                StringComparison.OrdinalIgnoreCase))
+            return ImageRuntimeBackend.Cuda;
+
+        if (runtimePath.Contains(
+                cpuMarker,
+                StringComparison.OrdinalIgnoreCase))
+            return ImageRuntimeBackend.Cpu;
+
+        return ImageRuntimeBackend.Unknown;
+    }
+
+    private bool IsLocalProcessRunning()
+    {
+        lock (_sync)
+        {
+            return _process is { HasExited: false };
+        }
+    }
+
+    private void StopLocalProcess()
+    {
+        Process? process;
+
+        lock (_sync)
+        {
+            process = _process;
+            _process = null;
+            CurrentSession = null;
+        }
+
+        if (process is null)
+            return;
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(3000);
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            process.Dispose();
+        }
+    }
+
+    private static async Task<bool> IsServerAliveAsync(
+        Uri serverUri,
+        CancellationToken ct)
     {
         try
         {
@@ -218,16 +401,25 @@ public sealed class ImageServerManager : IDisposable
                 Timeout = TimeSpan.FromSeconds(2)
             };
 
-            using var response = await client.GetAsync("v1/models", ct);
+            using var response =
+                await client.GetAsync("v1/models", ct);
+
             return response.IsSuccessStatusCode;
         }
-        catch
+        catch (OperationCanceledException)
+            when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (HttpRequestException)
         {
             return false;
         }
     }
 
-    private static async Task WaitForServerAsync(Uri serverUri, CancellationToken ct)
+    private static async Task WaitForServerAsync(
+        Uri serverUri,
+        CancellationToken ct)
     {
         var deadline = DateTime.UtcNow.AddMinutes(5);
 
@@ -241,22 +433,29 @@ public sealed class ImageServerManager : IDisposable
             await Task.Delay(500, ct);
         }
 
-        throw new TimeoutException("Image server не стал готов за 5 минут.");
+        throw new TimeoutException(
+            "Image server не стал готов за 5 минут.");
+    }
+
+    private static async Task WaitUntilServerStopsAsync(
+        Uri serverUri,
+        CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (!await IsServerAliveAsync(serverUri, ct))
+                return;
+
+            await Task.Delay(250, ct);
+        }
     }
 
     public void Dispose()
     {
-        try
-        {
-            if (_process is { HasExited: false })
-                _process.Kill(entireProcessTree: true);
-        }
-        catch
-        {
-        }
-
-        _process?.Dispose();
-        _process = null;
-        CurrentSession = null;
+        StopLocalProcess();
     }
 }

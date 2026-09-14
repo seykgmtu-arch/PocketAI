@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Windows;
 using Microsoft.Win32;
@@ -57,6 +58,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _imagePrompt = "";
     private string _imageStatusText = "Image server: выключен";
     private string _lastImagePath = "";
+    private string _imageHardwareText = "Image hardware: определяем…";
+    private string _imageRuntimeText = "Image backend/model: не проверен";
+    private ImageProfile? _selectedImageProfile;
 
     private bool _isInitializing = true;
     private bool _isGenerating;
@@ -85,6 +89,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _imageServerManager = new ImageServerManager(_baseDirectory);
         _useWeb = config.Web.Enabled;
         _imagesEnabled = config.Images.Enabled;
+        _selectedImageProfile =
+            config.Images.Width <= 512 && config.Images.Height <= 512
+                ? ImageProfile.Sd15Fast512
+                : ImageProfile.Sdxl1024;
 
         SendCommand = new AsyncRelayCommand(
             SendAsync,
@@ -114,6 +122,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<ChatBubbleViewModel> Messages { get; } = new();
     public ObservableCollection<LocalModelDescriptor> Models { get; } = new();
+
+    public IReadOnlyList<ImageProfile> ImageProfiles { get; } =
+        new[]
+        {
+            ImageProfile.Sd15Fast512,
+            ImageProfile.Sdxl1024
+        };
 
     public AsyncRelayCommand SendCommand { get; }
     public RelayCommand CancelCommand { get; }
@@ -207,6 +222,38 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         get => _imageStatusText;
         private set => SetProperty(ref _imageStatusText, value);
     }
+
+    public string ImageHardwareText
+    {
+        get => _imageHardwareText;
+        private set => SetProperty(ref _imageHardwareText, value);
+    }
+
+    public string ImageRuntimeText
+    {
+        get => _imageRuntimeText;
+        private set => SetProperty(ref _imageRuntimeText, value);
+    }
+
+    public ImageProfile? SelectedImageProfile
+    {
+        get => _selectedImageProfile;
+        set
+        {
+            if (SetProperty(ref _selectedImageProfile, value) && value is not null)
+            {
+                _config.Images.Width = value.Width;
+                _config.Images.Height = value.Height;
+                ConfigLoader.Save(_baseDirectory, _config);
+                OnPropertyChanged(nameof(ImageProfileText));
+            }
+        }
+    }
+
+    public string ImageProfileText =>
+        SelectedImageProfile is null
+            ? "Image profile: не выбран"
+            : $"{SelectedImageProfile.Name} · {_config.Images.Width}×{_config.Images.Height}";
 
     public bool ImagesEnabled
     {
@@ -327,6 +374,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                       (_hardware.Avx2Supported ? " · AVX2" : "");
             GpuText = _hardware.PrimaryGpuName;
             MemoryText = $"{GiB(_hardware.TotalMemoryBytes):0.#} GB RAM · свободно {GiB(_hardware.AvailableMemoryBytes):0.#} GB";
+            ImageHardwareText = BuildImageHardwareSummary();
 
             await RefreshKnowledgeStatusAsync();
 
@@ -736,7 +784,7 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
 
         try
         {
-            var model = await EnsureImageServerAsync(_generationCts.Token);
+            var model = await EnsureImageServerWithProfileAsync(_generationCts.Token);
             ImageStatusText = $"Image server: готов · {model}";
         }
         catch (OperationCanceledException)
@@ -754,46 +802,105 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
         }
     }
 
-    private async Task<string> EnsureImageServerAsync(CancellationToken ct)
+    private async Task<string> EnsureImageServerWithProfileAsync(CancellationToken ct)
     {
         if (!Uri.TryCreate(_config.Images.ServerUrl, UriKind.Absolute, out var serverUri))
             throw new InvalidDataException("images.serverUrl имеет неверный формат.");
 
-        Exception? externalError = null;
+        var profile = SelectedImageProfile ?? ImageProfile.Sdxl1024;
+
+        _config.Images.Width = profile.Width;
+        _config.Images.Height = profile.Height;
+        ConfigLoader.Save(_baseDirectory, _config);
+        OnPropertyChanged(nameof(ImageProfileText));
+
+        var session = await _imageServerManager.EnsureStartedAsync(
+            serverUri,
+            preferCuda: _hardware?.HasNvidiaGpu == true,
+            profile: profile,
+            threads: Math.Max(
+                1,
+                _hardware?.LogicalProcessors ?? Environment.ProcessorCount),
+            progress: new Progress<string>(text => ImageStatusText = text),
+            ct: ct);
+
+        var serverKind =
+            session.RuntimePath == "(external)"
+                ? "external server"
+                : session.ReusedExistingServer
+                    ? "reused local server"
+                    : "local server";
+
+        ImageRuntimeText =
+            $"{session.Backend} · {session.ModelLabel} · {serverKind}";
+
+        using var client = new ImageGenerationClient(serverUri);
+        return await client.CheckAsync(ct);
+    }
+
+    private string BuildImageHardwareSummary()
+    {
+        var fallback =
+            $"{_hardware?.PrimaryGpuName ?? "GPU unknown"} · " +
+            (_hardware?.HasNvidiaGpu == true ? "CUDA preferred" : "backend auto");
+
+        if (_hardware?.HasNvidiaGpu != true)
+            return fallback;
 
         try
         {
-            using var externalClient = new ImageGenerationClient(serverUri);
-            return await externalClient.CheckAsync(ct);
+            var psi = new ProcessStartInfo
+            {
+                FileName = "nvidia-smi",
+                Arguments =
+                    "--query-gpu=name,memory.total --format=csv,noheader,nounits",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi);
+
+            if (process is null)
+                return fallback;
+
+            var output = process.StandardOutput.ReadToEnd().Trim();
+
+            if (!process.WaitForExit(2500) || string.IsNullOrWhiteSpace(output))
+                return fallback;
+
+            var firstLine = output
+                .Split(
+                    new[] { '\r', '\n' },
+                    StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(firstLine))
+                return fallback;
+
+            var parts = firstLine.Split(
+                ',',
+                2,
+                StringSplitOptions.TrimEntries);
+
+            if (parts.Length == 2 &&
+                double.TryParse(
+                    parts[1],
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out var memoryMiB))
+            {
+                return
+                    $"{parts[0]} · {memoryMiB / 1024.0:0.#} GB VRAM · CUDA preferred";
+            }
+
+            return firstLine + " · CUDA preferred";
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch
         {
-            externalError = ex;
+            return fallback;
         }
-
-        ImageStatusText = "Image server не отвечает · ищем локальный sd-server.exe…";
-
-        var threads = Math.Max(
-            1,
-            _hardware?.LogicalProcessors ?? Environment.ProcessorCount);
-
-        var localStarted = await _imageServerManager.TryStartAsync(
-            serverUri,
-            threads,
-            new Progress<string>(text => ImageStatusText = text),
-            ct);
-
-        if (!localStarted)
-        {
-            throw new InvalidOperationException(
-                "Image server недоступен. Запустите внешний stable-diffusion.cpp server " +
-                $"по адресу {_config.Images.ServerUrl} либо положите sd-server.exe в " +
-                "runtime\\image и модель .safetensors/.ckpt/.gguf в models\\images. " +
-                "Исходная ошибка: " + externalError?.GetBaseException().Message);
-        }
-
-        using var localClient = new ImageGenerationClient(serverUri);
-        return await localClient.CheckAsync(ct);
     }
 
     private async Task GenerateImageAsync()
@@ -817,7 +924,8 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
 
         try
         {
-            var model = await EnsureImageServerAsync(_generationCts.Token);
+            var model = await EnsureImageServerWithProfileAsync(
+                _generationCts.Token);
 
             ImageStatusText =
                 $"Генерация {_config.Images.Width}×{_config.Images.Height} · {model}…";
@@ -837,7 +945,10 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
                 _generationCts.Token);
 
             LastImagePath = Path.GetFullPath(path);
-            ImageStatusText = "Готово · " + Path.GetFileName(path);
+
+            ImageStatusText =
+                $"Готово · {Path.GetFileName(path)} · " +
+                $"{_config.Images.Width}×{_config.Images.Height}";
         }
         catch (OperationCanceledException)
         {

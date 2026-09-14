@@ -88,22 +88,57 @@ public sealed class DiagnosticReportService
             config.Embeddings.Enabled &&
             File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Embeddings.ModelPath));
 
+        var imageCudaRuntimeExists =
+            File.Exists(Path.Combine(
+                _baseDirectory,
+                "runtime",
+                "image",
+                "cuda",
+                "sd-server.exe"));
+
+        var imageCpuRuntimeExists =
+            File.Exists(Path.Combine(
+                _baseDirectory,
+                "runtime",
+                "image",
+                "cpu",
+                "sd-server.exe"));
+
+        var imageGenericRuntimeExists =
+            File.Exists(Path.Combine(
+                _baseDirectory,
+                "runtime",
+                "image",
+                "sd-server.exe"));
+
         var imageRuntimeExists =
-            File.Exists(Path.Combine(_baseDirectory, "runtime", "image", "sd-server.exe"));
+            imageCudaRuntimeExists ||
+            imageCpuRuntimeExists ||
+            imageGenericRuntimeExists;
 
         var imageModelsDirectory =
             Path.Combine(_baseDirectory, "models", "images");
 
-        var imageModelPresent =
-            Directory.Exists(imageModelsDirectory) &&
-            Directory.EnumerateFiles(imageModelsDirectory).Any(
-                path =>
-                {
-                    var extension = Path.GetExtension(path);
-                    return extension.Equals(".safetensors", StringComparison.OrdinalIgnoreCase) ||
-                           extension.Equals(".ckpt", StringComparison.OrdinalIgnoreCase) ||
-                           extension.Equals(".gguf", StringComparison.OrdinalIgnoreCase);
-                });
+        var imageModelCount =
+            Directory.Exists(imageModelsDirectory)
+                ? Directory.EnumerateFiles(imageModelsDirectory).Count(
+                    path =>
+                    {
+                        var extension = Path.GetExtension(path);
+                        return
+                            extension.Equals(
+                                ".safetensors",
+                                StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(
+                                ".ckpt",
+                                StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(
+                                ".gguf",
+                                StringComparison.OrdinalIgnoreCase);
+                    })
+                : 0;
+
+        var imageModelPresent = imageModelCount > 0;
 
         var imageServerUsesLoopback =
             Uri.TryCreate(config.Images.ServerUrl, UriKind.Absolute, out var imageServerUri) &&
@@ -132,8 +167,18 @@ public sealed class DiagnosticReportService
                 ? "stable-diffusion.cpp OpenAI-compatible /v1/images/generations"
                 : "disabled",
             imageRuntimeExists,
+            imageCudaRuntimeExists,
+            imageCpuRuntimeExists,
+            imageGenericRuntimeExists,
             imageModelPresent,
+            imageModelCount,
             imageServerUsesLoopback,
+            imagePreferredBackend =
+                hardware?.HasNvidiaGpu == true ? "CUDA" : "auto/CPU",
+            imageRecommendedProfile =
+                hardware?.HasNvidiaGpu == true ? "SDXL 1024" : "SD 1.5 Fast 512",
+            imageProfilesSupported =
+                new[] { "SD 1.5 Fast 512", "SDXL 1024" },
             embeddingProvider = embeddingsConfigured
                 ? "Qwen3-Embedding GGUF via llama.cpp"
                 : "not configured",
@@ -195,8 +240,20 @@ public sealed class DiagnosticReportService
             webConfigured = config.Web.Enabled,
             imagesConfigured = config.Images.Enabled,
             imageRuntimeExists,
+            imageCudaRuntimeExists,
+            imageCpuRuntimeExists,
+            imageGenericRuntimeExists,
             imageModelPresent,
+            imageModelCount,
             imageServerUsesLoopback,
+            imageRuntimeSearchOrder = new[]
+            {
+                "runtime/image/cuda/sd-server.exe",
+                "runtime/image/sd-server.exe",
+                "runtime/image/cpu/sd-server.exe"
+            },
+            imageProfilesSupported =
+                new[] { "SD 1.5 Fast 512", "SDXL 1024" },
             imageOutputDirectoryConfigured =
                 !string.IsNullOrWhiteSpace(config.Images.OutputDirectory),
             imageWidth = config.Images.Width,
@@ -252,6 +309,8 @@ public sealed class DiagnosticReportService
             "models/chat",
             "models/embeddings",
             "runtime/image",
+            "runtime/image/cuda",
+            "runtime/image/cpu",
             "models/images",
             "outputs/images",
             "logs"
