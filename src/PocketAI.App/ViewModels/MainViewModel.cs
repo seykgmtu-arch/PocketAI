@@ -37,6 +37,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly KnowledgeStore _knowledgeStore;
     private readonly DiagnosticReportService _diagnostics;
     private readonly WebResearchClient _web = new();
+    private readonly ImageServerManager _imageServerManager;
 
     private LlamaApiClient? _apiClient;
     private EmbeddingApiClient? _embeddingClient;
@@ -55,6 +56,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _diagnosticStatusText = "Отчёт ещё не создавался";
     private string _imagePrompt = "";
     private string _imageStatusText = "Image server: выключен";
+    private string _lastImagePath = "";
 
     private bool _isInitializing = true;
     private bool _isGenerating;
@@ -62,6 +64,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _isReady;
     private bool _useKnowledge = true;
     private bool _useWeb;
+    private bool _imagesEnabled;
     private string? _errorText;
     private LocalModelDescriptor? _selectedModel;
 
@@ -79,7 +82,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _modelCatalog = new LocalModelCatalog(_baseDirectory);
         _knowledgeStore = new KnowledgeStore(_baseDirectory);
         _diagnostics = new DiagnosticReportService(_baseDirectory);
+        _imageServerManager = new ImageServerManager(_baseDirectory);
         _useWeb = config.Web.Enabled;
+        _imagesEnabled = config.Images.Enabled;
 
         SendCommand = new AsyncRelayCommand(
             SendAsync,
@@ -98,7 +103,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OpenDiagnosticsFolderCommand = new RelayCommand(OpenDiagnosticsFolder);
         GenerateImageCommand = new AsyncRelayCommand(
             GenerateImageAsync,
-            () => !IsGenerating && !string.IsNullOrWhiteSpace(ImagePrompt));
+            () => !IsGenerating && ImagesEnabled && !string.IsNullOrWhiteSpace(ImagePrompt));
+        CheckImageServerCommand = new AsyncRelayCommand(
+            CheckImageServerAsync,
+            () => !IsGenerating && ImagesEnabled);
+        OpenImagesFolderCommand = new RelayCommand(OpenImagesFolder);
 
         RefreshModels();
     }
@@ -116,6 +125,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand CreateDiagnosticReportCommand { get; }
     public RelayCommand OpenDiagnosticsFolderCommand { get; }
     public AsyncRelayCommand GenerateImageCommand { get; }
+    public AsyncRelayCommand CheckImageServerCommand { get; }
+    public RelayCommand OpenImagesFolderCommand { get; }
 
     public string InputText
     {
@@ -196,6 +207,37 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         get => _imageStatusText;
         private set => SetProperty(ref _imageStatusText, value);
     }
+
+    public bool ImagesEnabled
+    {
+        get => _imagesEnabled;
+        set
+        {
+            if (SetProperty(ref _imagesEnabled, value))
+            {
+                _config.Images.Enabled = value;
+                ConfigLoader.Save(_baseDirectory, _config);
+                ImageStatusText = value
+                    ? "Image API включён · сервер будет проверен перед генерацией"
+                    : "Image server: выключен";
+                GenerateImageCommand.RaiseCanExecuteChanged();
+                CheckImageServerCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string LastImagePath
+    {
+        get => _lastImagePath;
+        private set
+        {
+            if (SetProperty(ref _lastImagePath, value))
+                OnPropertyChanged(nameof(HasLastImage));
+        }
+    }
+
+    public bool HasLastImage =>
+        !string.IsNullOrWhiteSpace(LastImagePath) && File.Exists(LastImagePath);
 
     public bool UseKnowledge
     {
@@ -297,8 +339,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
             await TryStartEmbeddingsAsync();
 
-            ImageStatusText = _config.Images.Enabled
-                ? "Image server: настроен"
+            ImageStatusText = ImagesEnabled
+                ? "Image API включён · сервер будет проверен перед генерацией"
                 : "Image server: выключен";
 
             StatusText = "Pocket AI готов";
@@ -681,51 +723,150 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
         }
     }
 
-    private async Task GenerateImageAsync()
+    private async Task CheckImageServerAsync()
     {
-        if (!_config.Images.Enabled)
-        {
-            MessageBox.Show(
-                "В pocketai.json включите images.enabled=true и запустите локальный stable-diffusion.cpp server.",
-                "Pocket AI");
+        if (!ImagesEnabled)
             return;
-        }
 
         IsGenerating = true;
+        ErrorText = null;
+
+        _generationCts?.Dispose();
+        _generationCts = new CancellationTokenSource();
 
         try
         {
-            ImageStatusText = "Генерация…";
-            var outputDirectory = ConfigLoader.ResolvePath(
-                _baseDirectory,
-                _config.Images.OutputDirectory);
-
-            using var client = new ImageGenerationClient(new Uri(_config.Images.ServerUrl));
-            var path = await client.GenerateAsync(
-                ImagePrompt,
-                _config.Images.Width,
-                _config.Images.Height,
-                outputDirectory);
-
-            ImageStatusText = "Сохранено: " + path;
-
-            Process.Start(
-                new ProcessStartInfo(
-                    "explorer.exe",
-                    $"/select,\"{path}\"")
-                {
-                    UseShellExecute = true
-                });
+            var model = await EnsureImageServerAsync(_generationCts.Token);
+            ImageStatusText = $"Image server: готов · {model}";
+        }
+        catch (OperationCanceledException)
+        {
+            ImageStatusText = "Проверка image server остановлена";
         }
         catch (Exception ex)
         {
-            ErrorText = Friendly(ex);
-            ImageStatusText = "Ошибка image server";
+            ErrorText = "Images: " + Friendly(ex);
+            ImageStatusText = "Image server: недоступен";
         }
         finally
         {
             IsGenerating = false;
         }
+    }
+
+    private async Task<string> EnsureImageServerAsync(CancellationToken ct)
+    {
+        if (!Uri.TryCreate(_config.Images.ServerUrl, UriKind.Absolute, out var serverUri))
+            throw new InvalidDataException("images.serverUrl имеет неверный формат.");
+
+        Exception? externalError = null;
+
+        try
+        {
+            using var externalClient = new ImageGenerationClient(serverUri);
+            return await externalClient.CheckAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            externalError = ex;
+        }
+
+        ImageStatusText = "Image server не отвечает · ищем локальный sd-server.exe…";
+
+        var threads = Math.Max(
+            1,
+            _hardware?.LogicalProcessors ?? Environment.ProcessorCount);
+
+        var localStarted = await _imageServerManager.TryStartAsync(
+            serverUri,
+            threads,
+            new Progress<string>(text => ImageStatusText = text),
+            ct);
+
+        if (!localStarted)
+        {
+            throw new InvalidOperationException(
+                "Image server недоступен. Запустите внешний stable-diffusion.cpp server " +
+                $"по адресу {_config.Images.ServerUrl} либо положите sd-server.exe в " +
+                "runtime\\image и модель .safetensors/.ckpt/.gguf в models\\images. " +
+                "Исходная ошибка: " + externalError?.GetBaseException().Message);
+        }
+
+        using var localClient = new ImageGenerationClient(serverUri);
+        return await localClient.CheckAsync(ct);
+    }
+
+    private async Task GenerateImageAsync()
+    {
+        if (!ImagesEnabled)
+        {
+            MessageBox.Show(
+                "Включите локальный Image API во вкладке «Изображения».",
+                "Pocket AI");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ImagePrompt))
+            return;
+
+        IsGenerating = true;
+        ErrorText = null;
+
+        _generationCts?.Dispose();
+        _generationCts = new CancellationTokenSource();
+
+        try
+        {
+            var model = await EnsureImageServerAsync(_generationCts.Token);
+
+            ImageStatusText =
+                $"Генерация {_config.Images.Width}×{_config.Images.Height} · {model}…";
+
+            var outputDirectory = ConfigLoader.ResolvePath(
+                _baseDirectory,
+                _config.Images.OutputDirectory);
+
+            using var client =
+                new ImageGenerationClient(new Uri(_config.Images.ServerUrl));
+
+            var path = await client.GenerateAsync(
+                ImagePrompt.Trim(),
+                _config.Images.Width,
+                _config.Images.Height,
+                outputDirectory,
+                _generationCts.Token);
+
+            LastImagePath = Path.GetFullPath(path);
+            ImageStatusText = "Готово · " + Path.GetFileName(path);
+        }
+        catch (OperationCanceledException)
+        {
+            ImageStatusText = "Генерация изображения остановлена";
+        }
+        catch (Exception ex)
+        {
+            ErrorText = "Images: " + Friendly(ex);
+            ImageStatusText = "Ошибка генерации изображения";
+        }
+        finally
+        {
+            IsGenerating = false;
+        }
+    }
+
+    private void OpenImagesFolder()
+    {
+        var path = ConfigLoader.ResolvePath(
+            _baseDirectory,
+            _config.Images.OutputDirectory);
+
+        Directory.CreateDirectory(path);
+
+        Process.Start(
+            new ProcessStartInfo("explorer.exe", path)
+            {
+                UseShellExecute = true
+            });
     }
 
     private async Task AddKnowledgeAsync()
@@ -911,6 +1052,7 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
         BuildVectorIndexCommand.RaiseCanExecuteChanged();
         CreateDiagnosticReportCommand.RaiseCanExecuteChanged();
         GenerateImageCommand.RaiseCanExecuteChanged();
+        CheckImageServerCommand.RaiseCanExecuteChanged();
     }
 
     public void Dispose()
@@ -919,6 +1061,7 @@ LOCAL KNOWLEDGE — GROUNDED ANSWER RULES:
         _apiClient?.Dispose();
         _embeddingClient?.Dispose();
         _embeddingServerManager.Dispose();
+        _imageServerManager.Dispose();
         _web.Dispose();
         _serverManager.Dispose();
     }

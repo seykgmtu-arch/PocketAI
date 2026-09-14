@@ -88,6 +88,27 @@ public sealed class DiagnosticReportService
             config.Embeddings.Enabled &&
             File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Embeddings.ModelPath));
 
+        var imageRuntimeExists =
+            File.Exists(Path.Combine(_baseDirectory, "runtime", "image", "sd-server.exe"));
+
+        var imageModelsDirectory =
+            Path.Combine(_baseDirectory, "models", "images");
+
+        var imageModelPresent =
+            Directory.Exists(imageModelsDirectory) &&
+            Directory.EnumerateFiles(imageModelsDirectory).Any(
+                path =>
+                {
+                    var extension = Path.GetExtension(path);
+                    return extension.Equals(".safetensors", StringComparison.OrdinalIgnoreCase) ||
+                           extension.Equals(".ckpt", StringComparison.OrdinalIgnoreCase) ||
+                           extension.Equals(".gguf", StringComparison.OrdinalIgnoreCase);
+                });
+
+        var imageServerUsesLoopback =
+            Uri.TryCreate(config.Images.ServerUrl, UriKind.Absolute, out var imageServerUri) &&
+            imageServerUri.IsLoopback;
+
         var report = new
         {
             createdAtLocal = DateTimeOffset.Now,
@@ -107,6 +128,12 @@ public sealed class DiagnosticReportService
             vectorCount,
             webEnabled,
             imageEnabled,
+            imageProvider = imageEnabled
+                ? "stable-diffusion.cpp OpenAI-compatible /v1/images/generations"
+                : "disabled",
+            imageRuntimeExists,
+            imageModelPresent,
+            imageServerUsesLoopback,
             embeddingProvider = embeddingsConfigured
                 ? "Qwen3-Embedding GGUF via llama.cpp"
                 : "not configured",
@@ -167,6 +194,13 @@ public sealed class DiagnosticReportService
                 "adaptive Top-K; absolute threshold=0.30; relative window=0.08; lexical fallback",
             webConfigured = config.Web.Enabled,
             imagesConfigured = config.Images.Enabled,
+            imageRuntimeExists,
+            imageModelPresent,
+            imageServerUsesLoopback,
+            imageOutputDirectoryConfigured =
+                !string.IsNullOrWhiteSpace(config.Images.OutputDirectory),
+            imageWidth = config.Images.Width,
+            imageHeight = config.Images.Height,
             systemPrompt = "[omitted]"
         };
 
