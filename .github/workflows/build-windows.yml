@@ -1,113 +1,4 @@
-name: Build and smoke-test Pocket AI Windows
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-
-permissions:
-  contents: read
-
-jobs:
-  build:
-    runs-on: windows-latest
-    timeout-minutes: 45
-
-    steps:
-
-      # ============================================================
-      # 1. Получение исходников
-      # ============================================================
-
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      # ============================================================
-      # 2. .NET 10
-      # ============================================================
-
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: '10.0.x'
-
-      # ============================================================
-      # 3. Restore
-      # ============================================================
-
-      - name: Restore
-        shell: pwsh
-        run: |
-          dotnet restore .\PocketAI.sln
-
-      # ============================================================
-      # 4. Build
-      # ============================================================
-
-      - name: Build
-        shell: pwsh
-        run: |
-          dotnet build .\PocketAI.sln `
-            -c Release `
-            --no-restore
-
-      # ============================================================
-      # 5. Cache AI assets
-      # ============================================================
-
-      - name: Cache downloaded AI assets
-        uses: actions/cache@v5
-        with:
-          path: .cache/downloads
-          key: pocketai-assets-b10941-qwen3-0.6b-q8
-
-      # ============================================================
-      # 6. llama.cpp + базовая GGUF chat-модель
-      # ============================================================
-
-      - name: Fetch verified llama.cpp runtimes and GGUF model
-        shell: pwsh
-        run: |
-          .\scripts\fetch-assets.ps1
-
-      # ============================================================
-      # 7. Проверка portable layout
-      # ============================================================
-
-      - name: Verify portable layout
-        shell: pwsh
-        run: |
-          .\scripts\verify-layout.ps1 -Strict
-
-      # ============================================================
-      # 8. Smoke-test llama.cpp CPU runtime
-      # ============================================================
-
-      - name: Smoke-test llama.cpp CPU runtime
-        shell: pwsh
-        run: |
-          .\scripts\smoke-test-runtime.ps1
-
-      # ============================================================
-      # 9. Publish Windows x64
-      # ============================================================
-
-      - name: Publish self-contained win-x64
-        shell: pwsh
-        run: |
-          .\scripts\publish-win-x64.ps1
-
-      # ============================================================
-      # 10. Smoke-test реального PocketAI.exe
-      # ============================================================
-
-      - name: Smoke-test actual PocketAI.exe
-        shell: pwsh
-        run: |
-          .\scripts\smoke-test-pocketai.ps1
-
-      # ============================================================
+ # ============================================================
       # 11. Создание облегчённого PATCH
       #
       # В PATCH попадают:
@@ -118,6 +9,13 @@ jobs:
       #   *.runtimeconfig.json
       #   runtimes\
       #
+      # В том числе:
+      #
+      #   PocketAI.Images.dll
+      #   Microsoft.Web.WebView2.Core.dll
+      #   Microsoft.Web.WebView2.Wpf.dll
+      #   runtimes\win-x64\native\WebView2Loader.dll
+      #
       # НЕ попадают:
       #
       #   pocketai.json
@@ -127,14 +25,25 @@ jobs:
       #   outputs\
       #   logs\
       #   diagnostics\
+      #   webview2\
       #
-      # Таким образом пользовательские модели,
-      # llama.cpp, база знаний и настройки сохраняются.
+      # Таким образом сохраняются:
+      #
+      #   пользовательские настройки
+      #   llama.cpp
+      #   sd-server.exe
+      #   локальные модели
+      #   база знаний
+      #   изображения
+      #   профиль Perchance/WebView2
+      #
       # ============================================================
 
       - name: Create lightweight patch archive
         shell: pwsh
         run: |
+
+          $ErrorActionPreference = "Stop"
 
           $source = ".\dist\PocketAI"
           $patchDir = ".\dist\PocketAI-patch"
@@ -146,9 +55,9 @@ jobs:
           Write-Host "======================================="
           Write-Host ""
 
-          # --------------------------------------------------------
+          # ========================================================
           # Очистка старого PATCH
-          # --------------------------------------------------------
+          # ========================================================
 
           Remove-Item `
             $patchDir `
@@ -166,22 +75,30 @@ jobs:
             -Path $patchDir `
             -Force | Out-Null
 
-          # --------------------------------------------------------
-          # Проверяем наличие publish-папки
-          # --------------------------------------------------------
+          # ========================================================
+          # Проверка publish-каталога
+          # ========================================================
 
           if (-not (Test-Path $source)) {
+
             throw "Publish directory not found: $source"
+
           }
 
-          # --------------------------------------------------------
+          Write-Host "Publish directory:"
+          Write-Host (Resolve-Path $source)
+          Write-Host ""
+
+          # ========================================================
           # PocketAI.exe
-          # --------------------------------------------------------
+          # ========================================================
 
           $exe = Join-Path $source "PocketAI.exe"
 
           if (-not (Test-Path $exe)) {
+
             throw "PocketAI.exe was not found in $source"
+
           }
 
           Copy-Item `
@@ -189,9 +106,26 @@ jobs:
             $patchDir `
             -Force
 
-          # --------------------------------------------------------
+          Write-Host "Copied PocketAI.exe"
+
+          # ========================================================
           # Все DLL из корня publish
-          # --------------------------------------------------------
+          #
+          # Сюда попадут:
+          #
+          # PocketAI.dll
+          # PocketAI.Core.dll
+          # PocketAI.Hardware.dll
+          # PocketAI.Inference.dll
+          # PocketAI.Knowledge.dll
+          # PocketAI.Web.dll
+          # PocketAI.Images.dll
+          #
+          # Microsoft.Web.WebView2.Core.dll
+          # Microsoft.Web.WebView2.Wpf.dll
+          #
+          # и другие необходимые managed DLL.
+          # ========================================================
 
           Get-ChildItem `
             -Path $source `
@@ -206,9 +140,11 @@ jobs:
 
           }
 
-          # --------------------------------------------------------
+          Write-Host "Root DLL files copied."
+
+          # ========================================================
           # *.deps.json
-          # --------------------------------------------------------
+          # ========================================================
 
           Get-ChildItem `
             -Path $source `
@@ -223,9 +159,11 @@ jobs:
 
           }
 
-          # --------------------------------------------------------
+          Write-Host "*.deps.json copied."
+
+          # ========================================================
           # *.runtimeconfig.json
-          # --------------------------------------------------------
+          # ========================================================
 
           Get-ChildItem `
             -Path $source `
@@ -240,19 +178,30 @@ jobs:
 
           }
 
-          # --------------------------------------------------------
+          Write-Host "*.runtimeconfig.json copied."
+
+          # ========================================================
           # Native runtimes NuGet/.NET
           #
           # ВАЖНО:
           #
           # runtimes\
           #
-          # это НЕ то же самое, что:
+          # НЕ является пользовательским каталогом:
+          #
+          # runtime\
+          #
+          # runtimes\ содержит native-компоненты NuGet.
+          #
+          # Для WebView2 здесь находится:
+          #
+          # runtimes\win-x64\native\WebView2Loader.dll
           #
           # runtime\llama\
+          # runtime\image\
           #
-          # runtime\llama НЕ включается.
-          # --------------------------------------------------------
+          # в PATCH НЕ включаются.
+          # ========================================================
 
           $nativeRuntimes = Join-Path $source "runtimes"
 
@@ -263,6 +212,13 @@ jobs:
               (Join-Path $patchDir "runtimes") `
               -Recurse `
               -Force
+
+            Write-Host "Native runtimes copied."
+
+          }
+          else {
+
+            Write-Host "WARNING: publish does not contain runtimes directory."
 
           }
 
@@ -287,6 +243,10 @@ jobs:
             "PocketAI.Web.dll",
 
             "PocketAI.Images.dll",
+
+            "Microsoft.Web.WebView2.Core.dll",
+
+            "Microsoft.Web.WebView2.Wpf.dll",
 
             "PocketAI.deps.json",
 
@@ -322,7 +282,61 @@ jobs:
           }
 
           # ========================================================
-          # Проверяем, что запрещённые данные не попали в PATCH
+          # Проверка WebView2 native loader
+          # ========================================================
+
+          Write-Host ""
+          Write-Host "======================================="
+          Write-Host " VERIFY WEBVIEW2 NATIVE RUNTIME"
+          Write-Host "======================================="
+          Write-Host ""
+
+          $webView2LoaderCandidates = @(
+
+            (Join-Path `
+              $patchDir `
+              "runtimes\win-x64\native\WebView2Loader.dll"),
+
+            (Join-Path `
+              $patchDir `
+              "runtimes\win-arm64\native\WebView2Loader.dll"),
+
+            (Join-Path `
+              $patchDir `
+              "runtimes\win-x86\native\WebView2Loader.dll")
+
+          )
+
+          $webView2Loader = $null
+
+          foreach ($candidate in $webView2LoaderCandidates) {
+
+            if (Test-Path $candidate) {
+
+              $webView2Loader = $candidate
+              break
+
+            }
+
+          }
+
+          if ($null -eq $webView2Loader) {
+
+            throw "WebView2Loader.dll is missing from PATCH runtimes."
+
+          }
+
+          $loaderInfo = Get-Item $webView2Loader
+
+          Write-Host (
+            "WebView2Loader.dll | {0} bytes | {1}" -f `
+            $loaderInfo.Length, `
+            $loaderInfo.FullName
+          )
+
+          # ========================================================
+          # Проверка того, что пользовательские данные НЕ попали
+          # в облегчённый PATCH
           # ========================================================
 
           $forbidden = @(
@@ -339,7 +353,9 @@ jobs:
 
             "logs",
 
-            "diagnostics"
+            "diagnostics",
+
+            "webview2"
 
           )
 
@@ -364,7 +380,7 @@ jobs:
           }
 
           # ========================================================
-          # Выводим полный состав PATCH
+          # Вывод полного состава PATCH
           # ========================================================
 
           Write-Host ""
@@ -373,30 +389,70 @@ jobs:
           Write-Host "======================================="
           Write-Host ""
 
-          Get-ChildItem `
+          $patchFiles = Get-ChildItem `
             $patchDir `
             -Recurse `
             -File |
-          ForEach-Object {
+          Sort-Object FullName
 
-            $relative = $_.FullName.Substring(
+          foreach ($file in $patchFiles) {
+
+            $relative = $file.FullName.Substring(
               $patchDir.Length
             ).TrimStart('\')
 
             Write-Host (
               "{0} | {1} bytes" -f `
               $relative, `
-              $_.Length
+              $file.Length
             )
 
           }
+
+          # ========================================================
+          # Статистика PATCH
+          # ========================================================
+
+          $patchFileCount = (
+            Get-ChildItem `
+              $patchDir `
+              -Recurse `
+              -File
+          ).Count
+
+          $patchTotalSize = (
+            Get-ChildItem `
+              $patchDir `
+              -Recurse `
+              -File |
+            Measure-Object `
+              -Property Length `
+              -Sum
+          ).Sum
+
+          Write-Host ""
+          Write-Host "======================================="
+          Write-Host " PATCH STATISTICS"
+          Write-Host "======================================="
+          Write-Host ""
+
+          Write-Host "Files:"
+          Write-Host $patchFileCount
+
+          Write-Host ""
+
+          Write-Host "Uncompressed size:"
+          Write-Host "$patchTotalSize bytes"
 
           # ========================================================
           # Создание ZIP
           # ========================================================
 
           Write-Host ""
-          Write-Host "Creating patch ZIP..."
+          Write-Host "======================================="
+          Write-Host " CREATING PATCH ZIP"
+          Write-Host "======================================="
+          Write-Host ""
 
           Compress-Archive `
             -Path "$patchDir\*" `
@@ -412,17 +468,60 @@ jobs:
 
           $zipInfo = Get-Item $patchZip
 
+          if ($zipInfo.Length -lt 1024) {
+
+            throw "Patch ZIP is unexpectedly small: $($zipInfo.Length) bytes"
+
+          }
+
+          # ========================================================
+          # Финальная информация
+          # ========================================================
+
           Write-Host ""
           Write-Host "======================================="
           Write-Host " PATCH READY"
           Write-Host "======================================="
           Write-Host ""
+
           Write-Host "File:"
           Write-Host $zipInfo.FullName
+
           Write-Host ""
-          Write-Host "Size:"
+
+          Write-Host "ZIP size:"
           Write-Host "$($zipInfo.Length) bytes"
+
           Write-Host ""
+
+          Write-Host "Files:"
+          Write-Host $patchFileCount
+
+          Write-Host ""
+
+          Write-Host "Included:"
+          Write-Host "  PocketAI application binaries"
+          Write-Host "  PocketAI.Images"
+          Write-Host "  WebView2 managed assemblies"
+          Write-Host "  WebView2Loader native runtime"
+
+          Write-Host ""
+
+          Write-Host "Preserved on user computer:"
+          Write-Host "  pocketai.json"
+          Write-Host "  models"
+          Write-Host "  runtime\llama"
+          Write-Host "  runtime\image"
+          Write-Host "  knowledge"
+          Write-Host "  outputs"
+          Write-Host "  logs"
+          Write-Host "  diagnostics"
+          Write-Host "  webview2\perchance-profile"
+
+          Write-Host ""
+          Write-Host "Lightweight PocketAI patch successfully created."
+          Write-Host ""
+
 
       # ============================================================
       # 12. Загрузка облегчённого PATCH
@@ -431,68 +530,11 @@ jobs:
       - name: Upload lightweight PocketAI patch
         uses: actions/upload-artifact@v6
         with:
+
           name: PocketAI-win-x64-patch
+
           path: dist/PocketAI-win-x64-patch.zip
+
           if-no-files-found: error
-          retention-days: 14
 
-      # ============================================================
-      # 13. Полный ZIP
-      #
-      # Используется для:
-      #
-      #   чистой установки
-      #   нового компьютера
-      #   восстановления
-      #
-      # Включает модели и runtime.
-      # ============================================================
-
-      - name: Create full release archive
-        shell: pwsh
-        run: |
-
-          $fullZip = ".\dist\PocketAI-win-x64.zip"
-
-          Remove-Item `
-            $fullZip `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Write-Host "Creating full PocketAI archive..."
-
-          Compress-Archive `
-            -Path .\dist\PocketAI\* `
-            -DestinationPath $fullZip `
-            -CompressionLevel Optimal `
-            -Force
-
-          if (-not (Test-Path $fullZip)) {
-
-            throw "Full PocketAI archive was not created."
-
-          }
-
-          $info = Get-Item $fullZip
-
-          Write-Host ""
-          Write-Host "Full archive ready:"
-          Write-Host $info.FullName
-          Write-Host ""
-          Write-Host "Size:"
-          Write-Host "$($info.Length) bytes"
-
-      # ============================================================
-      # 14. Загрузка полной сборки
-      # ============================================================
-
-      - name: Upload full PocketAI artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: PocketAI-win-x64
-          path: |
-            dist/PocketAI-win-x64.zip
-            dist/PocketAI/smoke-test-pocketai.json
-            smoke-test-runtime.json
-          if-no-files-found: error
           retention-days: 14
