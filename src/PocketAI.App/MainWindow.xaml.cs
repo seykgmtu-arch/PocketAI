@@ -58,10 +58,21 @@ public partial class MainWindow : Window
         _viewModel.Dispose();
     }
 
-    private void TrainingTab_OnSelected(
+    private void MainTabs_OnSelectionChanged(
         object sender,
-        RoutedEventArgs e)
+        SelectionChangedEventArgs e)
     {
+        // SelectionChanged is a routed event and can also bubble from
+        // ComboBox/ListBox controls inside tab content. React only to
+        // an actual change of the main TabControl selection.
+        if (!ReferenceEquals(
+                e.OriginalSource,
+                MainTabs) ||
+            !TrainingTab.IsSelected)
+        {
+            return;
+        }
+
         if (_trainingView is not null ||
             _trainingLoadFailed)
         {

@@ -247,9 +247,11 @@
                                Foreground="#FECACA"/>
                 </Border>
 
-                <TabControl Grid.Row="1"
+                <TabControl x:Name="MainTabs"
+                            Grid.Row="1"
                             Background="Transparent"
-                            BorderThickness="0">
+                            BorderThickness="0"
+                            SelectionChanged="MainTabs_OnSelectionChanged">
 
                     <TabItem Header="💬 Чат">
                         <Grid Margin="8">
@@ -316,8 +318,7 @@
                     </TabItem>
 
                     <TabItem x:Name="TrainingTab"
-                             Header="🧠 Training"
-                             Selected="TrainingTab_OnSelected">
+                             Header="🧠 Training">
 
                         <Border Background="{StaticResource PanelBrush}"
                                 BorderBrush="{StaticResource PanelBorderBrush}"
