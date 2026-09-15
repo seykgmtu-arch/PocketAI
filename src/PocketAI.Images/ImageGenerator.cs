@@ -3,6 +3,10 @@ using System.Text.Json;
 
 namespace PocketAI.Images;
 
+public sealed record ImageLoraSelection(
+    string Path,
+    double Weight);
+
 public sealed record ImageGenerationRequest(
     string Prompt,
     string NegativePrompt,
@@ -11,7 +15,13 @@ public sealed record ImageGenerationRequest(
     long Seed = -1,
     int Steps = 24,
     double CfgScale = 7.0,
-    int BatchSize = 1);
+    int BatchSize = 1,
+    ImageGenerationMode Mode = ImageGenerationMode.Auto,
+    string? HighResUpscaler = "latent",
+    double DenoisingStrength = 0.35,
+    int HighResSteps = 12,
+    bool EnableVaeTiling = true,
+    IReadOnlyList<ImageLoraSelection>? Loras = null);
 
 public sealed record ImageSizeValidationResult(
     int RequestedWidth,
@@ -59,8 +69,7 @@ public static class ImageSizePolicy
 
         var adjusted = width != requestedWidth || height != requestedHeight;
         var message = adjusted
-            ? $"Размер нормализован backend: {requestedWidth}×{requestedHeight} → {width}×{height}. " +
-              $"Допустимо {MinimumDimension}..{MaximumDimension}, кратность {Alignment}."
+            ? $"Размер нормализован backend: {requestedWidth}×{requestedHeight} → {width}×{height}. Допустимо {MinimumDimension}..{MaximumDimension}, кратность {Alignment}."
             : $"Размер принят backend без изменения: {width}×{height}.";
 
         return new ImageSizeValidationResult(
@@ -70,6 +79,32 @@ public static class ImageSizePolicy
             height,
             adjusted,
             message);
+    }
+
+    public static bool ShouldUseHighRes(ImageGenerationRequest request)
+    {
+        if (request.Mode == ImageGenerationMode.Native)
+            return false;
+
+        if (request.Mode == ImageGenerationMode.HiRes)
+            return true;
+
+        return Math.Max(request.Width, request.Height) > 640;
+    }
+
+    public static (int BaseWidth, int BaseHeight) GetBaseSizeForHighRes(
+        int width,
+        int height)
+    {
+        var largest = Math.Max(width, height);
+        if (largest <= 640)
+            return (width, height);
+
+        var scale = 640.0 / largest;
+        var baseWidth = Align(Math.Max(MinimumDimension, (int)Math.Round(width * scale)));
+        var baseHeight = Align(Math.Max(MinimumDimension, (int)Math.Round(height * scale)));
+
+        return (baseWidth, baseHeight);
     }
 
     private static int Align(int value)
@@ -86,9 +121,7 @@ public sealed class ImageGenerator : IDisposable
     public ImageGenerator(Uri baseUri)
     {
         if (!baseUri.IsAbsoluteUri)
-            throw new ArgumentException(
-                "Image server URI должен быть абсолютным.",
-                nameof(baseUri));
+            throw new ArgumentException("Image server URI должен быть абсолютным.", nameof(baseUri));
 
         _http = new HttpClient
         {
@@ -103,9 +136,7 @@ public sealed class ImageGenerator : IDisposable
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(request.Prompt))
-            throw new ArgumentException(
-                "Промпт изображения пуст.",
-                nameof(request));
+            throw new ArgumentException("Промпт изображения пуст.", nameof(request));
 
         var size = ImageSizePolicy.Normalize(request.Width, request.Height);
         var steps = Math.Clamp(request.Steps, 1, 150);
@@ -113,28 +144,49 @@ public sealed class ImageGenerator : IDisposable
         var batchSize = Math.Clamp(request.BatchSize, 1, 4);
         var seed = request.Seed < -1 ? -1 : request.Seed;
 
+        var enableHr = ImageSizePolicy.ShouldUseHighRes(request);
+        var (baseWidth, baseHeight) = enableHr
+            ? ImageSizePolicy.GetBaseSizeForHighRes(size.Width, size.Height)
+            : (size.Width, size.Height);
+
+        var loraPayload = request.Loras?
+            .Where(x => !string.IsNullOrWhiteSpace(x.Path))
+            .Select(x => new
+            {
+                path = x.Path,
+                scale = x.Weight
+            })
+            .ToArray();
+
         using var response = await _http.PostAsJsonAsync(
             "sdapi/v1/txt2img",
             new
             {
                 prompt = request.Prompt.Trim(),
                 negative_prompt = request.NegativePrompt?.Trim() ?? string.Empty,
-                width = size.Width,
-                height = size.Height,
+                width = baseWidth,
+                height = baseHeight,
                 steps,
                 cfg_scale = cfgScale,
                 seed,
-                batch_size = batchSize
+                batch_size = batchSize,
+
+                enable_hr = enableHr,
+                hr_upscaler = request.HighResUpscaler ?? "latent",
+                hr_resize_x = size.Width,
+                hr_resize_y = size.Height,
+                hr_second_pass_steps = Math.Clamp(request.HighResSteps, 1, 100),
+                denoising_strength = Math.Clamp(request.DenoisingStrength, 0.0, 1.0),
+
+                vae_tiling = request.EnableVaeTiling,
+                lora = loraPayload
             },
             ct);
 
         var body = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
-        {
-            throw new HttpRequestException(
-                $"Image server {(int)response.StatusCode}: {Trim(body, 1400)}");
-        }
+            throw new HttpRequestException($"Image server {(int)response.StatusCode}: {Trim(body, 1400)}");
 
         using var document = JsonDocument.Parse(body);
 
@@ -142,8 +194,7 @@ public sealed class ImageGenerator : IDisposable
             images.ValueKind != JsonValueKind.Array ||
             images.GetArrayLength() == 0)
         {
-            throw new InvalidDataException(
-                "Image server вернул ответ без массива images.");
+            throw new InvalidDataException("Image server вернул ответ без массива images.");
         }
 
         Directory.CreateDirectory(outputDirectory);
@@ -158,25 +209,17 @@ public sealed class ImageGenerator : IDisposable
                 continue;
 
             var commaIndex = base64.IndexOf(',');
-            if (base64.StartsWith(
-                    "data:",
-                    StringComparison.OrdinalIgnoreCase) &&
-                commaIndex >= 0)
-            {
+            if (base64.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && commaIndex >= 0)
                 base64 = base64[(commaIndex + 1)..];
-            }
 
             byte[] bytes;
-
             try
             {
                 bytes = Convert.FromBase64String(base64);
             }
             catch (FormatException ex)
             {
-                throw new InvalidDataException(
-                    "Image server вернул повреждённые base64-данные.",
-                    ex);
+                throw new InvalidDataException("Image server вернул повреждённые base64-данные.", ex);
             }
 
             if (bytes.Length < 256)
@@ -192,10 +235,7 @@ public sealed class ImageGenerator : IDisposable
         }
 
         if (paths.Count == 0)
-        {
-            throw new InvalidDataException(
-                "Image server не вернул ни одного непустого изображения.");
-        }
+            throw new InvalidDataException("Image server не вернул ни одного непустого изображения.");
 
         return new ImageGenerationResult(
             paths,
