@@ -1,518 +1,77 @@
-<Window x:Class="PocketAI.App.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="clr-namespace:PocketAI.App.ViewModels"
-        xmlns:views="clr-namespace:PocketAI.App.Views"
-        Title="Pocket AI Milestone 3"
-        Width="1280"
-        Height="820"
-        MinWidth="1000"
-        MinHeight="680"
-        WindowStartupLocation="CenterScreen"
-        Background="{StaticResource BackgroundBrush}"
-        Foreground="{StaticResource TextBrush}">
-
-    <!-- =========================================================
-         Ресурсы окна
-         ========================================================= -->
-
-    <Window.Resources>
-
-        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
-
-        <!-- =====================================================
-             Шаблон сообщений чата
-             ===================================================== -->
-
-        <DataTemplate DataType="{x:Type vm:ChatBubbleViewModel}">
-
-            <Grid Margin="0,6">
-
-                <Border MaxWidth="760"
-                        CornerRadius="12"
-                        Padding="14,11">
-
-                    <Border.Style>
-
-                        <Style TargetType="Border">
-
-                            <Setter Property="HorizontalAlignment"
-                                    Value="Left"/>
-
-                            <Setter Property="Background"
-                                    Value="{StaticResource AssistantBubbleBrush}"/>
-
-                            <Style.Triggers>
-
-                                <DataTrigger Binding="{Binding IsUser}"
-                                             Value="True">
-
-                                    <Setter Property="HorizontalAlignment"
-                                            Value="Right"/>
-
-                                    <Setter Property="Background"
-                                            Value="{StaticResource UserBubbleBrush}"/>
-
-                                </DataTrigger>
-
-                            </Style.Triggers>
-
-                        </Style>
-
-                    </Border.Style>
-
-                    <StackPanel>
-
-                        <TextBlock Text="{Binding Content}"
-                                   TextWrapping="Wrap"
-                                   FontSize="15"
-                                   LineHeight="22"/>
-
-                        <Border Margin="0,10,0,0"
-                                Padding="10,8"
-                                CornerRadius="8"
-                                Background="#162238"
-                                Visibility="{Binding HasSources,
-                                Converter={StaticResource BoolToVisibility}}">
-
-                            <StackPanel>
-
-                                <TextBlock Text="Найденные источники"
-                                           FontWeight="SemiBold"
-                                           FontSize="12"
-                                           Foreground="#C7D2FE"/>
-
-                                <TextBlock Text="{Binding SourcesText}"
-                                           TextWrapping="Wrap"
-                                           FontSize="11"
-                                           LineHeight="17"
-                                           Margin="0,4,0,0"
-                                           Foreground="{StaticResource MutedTextBrush}"/>
-
-                            </StackPanel>
-
-                        </Border>
-
-                    </StackPanel>
-
-                </Border>
-
-            </Grid>
-
-        </DataTemplate>
-
-    </Window.Resources>
-
-
-    <!-- =========================================================
-         Основной интерфейс
-         ========================================================= -->
-
-    <Grid Margin="18">
-
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
-
-
-        <!-- =====================================================
-             Верхняя панель
-             ===================================================== -->
-
-        <Grid Margin="0,0,0,12">
-
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-
-            <StackPanel>
-
-                <TextBlock Text="Pocket AI"
-                           FontSize="27"
-                           FontWeight="Bold"/>
-
-                <TextBlock Text="Private local AI · Milestone 3"
-                           Foreground="{StaticResource MutedTextBrush}"/>
-
-            </StackPanel>
-
-            <Border Grid.Column="1"
-                    Background="#123427"
-                    CornerRadius="999"
-                    Padding="12,7">
-
-                <TextBlock Text="{Binding StatusText}"
-                           Foreground="#C9FBE6"/>
-
-            </Border>
-
-        </Grid>
-
-
-        <!-- =====================================================
-             Рабочая область
-             ===================================================== -->
-
-        <Grid Grid.Row="1">
-
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="310"/>
-                <ColumnDefinition Width="14"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-
-            <!-- =================================================
-                 Левая панель
-                 ================================================= -->
-
-            <Border Grid.Column="0"
-                    Background="{StaticResource PanelBrush}"
-                    BorderBrush="{StaticResource PanelBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="14"
-                    Padding="14">
-
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-
-                    <StackPanel>
-
-                        <!-- =====================================
-                             Этот компьютер
-                             ===================================== -->
-
-                        <TextBlock Text="Этот компьютер"
-                                   FontWeight="SemiBold"
-                                   FontSize="16"/>
-
-                        <TextBlock Text="{Binding CpuText}"
-                                   TextWrapping="Wrap"
-                                   Margin="0,5,0,6"/>
-
-                        <TextBlock Text="{Binding GpuText}"
-                                   TextWrapping="Wrap"/>
-
-                        <TextBlock Text="{Binding MemoryText}"
-                                   Margin="0,5,0,10"/>
-
-
-                        <!-- =====================================
-                             Inference
-                             ===================================== -->
-
-                        <TextBlock Text="Inference"
-                                   Foreground="{StaticResource MutedTextBrush}"/>
-
-                        <TextBlock Text="{Binding BackendText}"
-                                   FontWeight="SemiBold"
-                                   Margin="0,3,0,12"/>
-
-
-                        <!-- =====================================
-                             WEB switch
-                             ===================================== -->
-
-                        <Border Background="#0E1728"
-                                CornerRadius="9"
-                                Padding="10"
-                                Margin="0,0,0,12">
-
-                            <StackPanel>
-
-                                <TextBlock Text="🔒 LOCAL by default"
-                                           FontWeight="SemiBold"/>
-
-                                <CheckBox Content="🌐 WEB ENABLED"
-                                          IsChecked="{Binding UseWeb}"
-                                          Margin="0,8,0,0"/>
-
-                                <TextBlock Text="Интернет используется только когда включён WEB ENABLED."
-                                           FontSize="11"
-                                           TextWrapping="Wrap"
-                                           Foreground="{StaticResource MutedTextBrush}"/>
-
-                            </StackPanel>
-
-                        </Border>
-
-
-                        <!-- =====================================
-                             Модель LLM
-                             ===================================== -->
-
-                        <TextBlock Text="Модель"
-                                   FontWeight="SemiBold"/>
-
-                        <TextBlock Text="{Binding ModelStatusText}"
-                                   Foreground="{StaticResource MutedTextBrush}"/>
-
-                        <ComboBox ItemsSource="{Binding Models}"
-                                  SelectedItem="{Binding SelectedModel}"
-                                  DisplayMemberPath="Label"
-                                  Margin="0,5,0,5"/>
-
-                        <StackPanel Orientation="Horizontal">
-
-                            <Button Content="Обновить"
-                                    Command="{Binding RefreshModelsCommand}"
-                                    Margin="0,0,6,0"
-                                    Padding="8,5"/>
-
-                            <Button Content="Применить"
-                                    Command="{Binding ApplyModelCommand}"
-                                    Padding="8,5"/>
-
-                        </StackPanel>
-
-
-                        <Separator Margin="0,12"/>
-
-
-                        <!-- =====================================
-                             Knowledge / RAG
-                             ===================================== -->
-
-                        <TextBlock Text="Knowledge / RAG"
-                                   FontWeight="SemiBold"/>
-
-                        <TextBlock Text="{Binding KnowledgeStatusText}"
-                                   Foreground="{StaticResource MutedTextBrush}"/>
-
-                        <TextBlock Text="{Binding VectorStatusText}"
-                                   TextWrapping="Wrap"
-                                   Foreground="{StaticResource MutedTextBrush}"
-                                   Margin="0,3,0,6"/>
-
-                        <CheckBox Content="Использовать RAG"
-                                  IsChecked="{Binding UseKnowledge}"/>
-
-                        <Button Content="Добавить PDF/DOCX/TXT"
-                                Command="{Binding AddKnowledgeCommand}"
-                                Margin="0,7,0,5"/>
-
-                        <Button Content="Построить vector index"
-                                Command="{Binding BuildVectorIndexCommand}"
-                                Margin="0,0,0,5"/>
-
-                        <Button Content="Очистить индекс"
-                                Command="{Binding ClearKnowledgeCommand}"
-                                Background="#475569"/>
-
-
-                        <Separator Margin="0,12"/>
-
-
-                        <!-- =====================================
-                             Диагностика
-                             ===================================== -->
-
-                        <TextBlock Text="Диагностика"
-                                   FontWeight="SemiBold"/>
-
-                        <TextBlock Text="{Binding DiagnosticStatusText}"
-                                   TextWrapping="Wrap"
-                                   FontSize="11"
-                                   Foreground="{StaticResource MutedTextBrush}"
-                                   MaxHeight="54"/>
-
-                        <Button Content="Создать ZIP"
-                                Command="{Binding CreateDiagnosticReportCommand}"
-                                Margin="0,7,0,5"/>
-
-                        <Button Content="Открыть diagnostics"
-                                Command="{Binding OpenDiagnosticsFolderCommand}"
-                                Background="#334155"/>
-
-                    </StackPanel>
-
-                </ScrollViewer>
-
-            </Border>
-
-
-            <!-- =================================================
-                 Правая рабочая область
-                 ================================================= -->
-
-            <Grid Grid.Column="2">
-
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-
-
-                <!-- =============================================
-                     Общая ошибка приложения
-                     ============================================= -->
-
-                <Border Grid.Row="0"
-                        Background="#3A1D1D"
-                        BorderBrush="#7F1D1D"
-                        BorderThickness="1"
-                        CornerRadius="10"
-                        Padding="10"
-                        Margin="0,0,0,8"
-                        Visibility="{Binding HasError,
-                        Converter={StaticResource BoolToVisibility}}">
-
-                    <TextBlock Text="{Binding ErrorText}"
-                               TextWrapping="Wrap"
-                               Foreground="#FECACA"/>
-
-                </Border>
-
-
-                <!-- =============================================
-                     Вкладки
-                     ============================================= -->
-
-                <TabControl Grid.Row="1"
-                            Background="Transparent"
-                            BorderThickness="0">
-
-
-                    <!-- =========================================
-                         CHAT
-                         ========================================= -->
-
-                    <TabItem Header="💬 Чат">
-
-                        <Grid Margin="8">
-
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="*"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-
-
-                            <!-- Chat history -->
-
-                            <Border Grid.Row="0"
-                                    Background="{StaticResource PanelBrush}"
-                                    BorderBrush="{StaticResource PanelBorderBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="14"
-                                    Padding="10">
-
-                                <ListBox x:Name="ChatList"
-                                         ItemsSource="{Binding Messages}"
-                                         Background="Transparent"
-                                         BorderThickness="0"
-                                         Foreground="{StaticResource TextBrush}"
-                                         HorizontalContentAlignment="Stretch"/>
-
-                            </Border>
-
-
-                            <!-- Prompt -->
-
-                            <Grid Grid.Row="1"
-                                  Margin="0,10,0,0">
-
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-
-
-                                <Border Grid.Column="0"
-                                        Background="{StaticResource PanelBrush}"
-                                        CornerRadius="10"
-                                        Padding="10,4"
-                                        Margin="0,0,8,0">
-
-                                    <TextBox x:Name="PromptBox"
-                                             Text="{Binding InputText,
-                                             UpdateSourceTrigger=PropertyChanged}"
-                                             Background="Transparent"
-                                             Foreground="{StaticResource TextBrush}"
-                                             BorderThickness="0"
-                                             AcceptsReturn="True"
-                                             MinHeight="42"
-                                             MaxHeight="110"
-                                             TextWrapping="Wrap"
-                                             PreviewKeyDown="PromptBox_OnPreviewKeyDown"/>
-
-                                </Border>
-
-
-                                <Button Grid.Column="1"
-                                        Content="Остановить"
-                                        Command="{Binding CancelCommand}"
-                                        Background="#7F1D1D"
-                                        Margin="0,0,6,0"/>
-
-
-                                <Button Grid.Column="2"
-                                        Content="Отправить"
-                                        Command="{Binding SendCommand}"/>
-
-                            </Grid>
-
-                        </Grid>
-
-                    </TabItem>
-
-
-                    <!-- =========================================
-                         LOCAL IMAGE GENERATOR
-                         ========================================= -->
-
-                    <TabItem Header="🎨 LOCAL">
-
-                        <views:ImageGeneratorView/>
-
-                    </TabItem>
-
-
-                    <!-- =========================================
-                         PERCHANCE ONLINE
-                         ========================================= -->
-
-                    <TabItem Header="🌐 Perchance Online">
-
-                        <views:PerchanceBrowserView/>
-
-                    </TabItem>
-
-
-                </TabControl>
-
-
-                <!-- =============================================
-                     Initialization overlay
-                     ============================================= -->
-
-                <Border Grid.RowSpan="2"
-                        Background="#CC0B1020"
-                        CornerRadius="14"
-                        Visibility="{Binding IsInitializing,
-                        Converter={StaticResource BoolToVisibility}}">
-
-                    <StackPanel HorizontalAlignment="Center"
-                                VerticalAlignment="Center">
-
-                        <ProgressBar IsIndeterminate="True"
-                                     Width="340"
-                                     Height="5"/>
-
-                        <TextBlock Text="Настраиваем Pocket AI Milestone 3"
-                                   FontSize="22"
-                                   FontWeight="Bold"
-                                   Margin="0,15,0,0"/>
-
-                    </StackPanel>
-
-                </Border>
-
-            </Grid>
-
-        </Grid>
-
-    </Grid>
-
-</Window>
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Windows;
+using System.Windows.Input;
+using PocketAI.App.ViewModels;
+
+namespace PocketAI.App;
+
+public partial class MainWindow : Window
+{
+    private readonly MainViewModel _viewModel;
+
+    public MainWindow(MainViewModel viewModel)
+    {
+        InitializeComponent();
+
+        _viewModel = viewModel;
+        DataContext = viewModel;
+
+        Loaded += OnLoaded;
+        Closing += OnClosing;
+
+        _viewModel.Messages.CollectionChanged += OnMessagesChanged;
+    }
+
+    private async void OnLoaded(
+        object sender,
+        RoutedEventArgs e)
+    {
+        await _viewModel.InitializeAsync();
+
+        PromptBox.Focus();
+    }
+
+    private void OnClosing(
+        object? sender,
+        CancelEventArgs e)
+    {
+        _viewModel.Messages.CollectionChanged -= OnMessagesChanged;
+
+        _viewModel.Dispose();
+    }
+
+    private void OnMessagesChanged(
+        object? sender,
+        NotifyCollectionChangedEventArgs e)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (ChatList.Items.Count > 0)
+            {
+                ChatList.ScrollIntoView(
+                    ChatList.Items[
+                        ChatList.Items.Count - 1]);
+            }
+        });
+    }
+
+    private void PromptBox_OnPreviewKeyDown(
+        object sender,
+        KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter ||
+            Keyboard.Modifiers.HasFlag(
+                ModifierKeys.Shift))
+        {
+            return;
+        }
+
+        if (_viewModel.SendCommand.CanExecute(null))
+        {
+            e.Handled = true;
+
+            _viewModel.SendCommand.Execute(null);
+        }
+    }
+}
