@@ -150,6 +150,16 @@
                                 Margin="0,0,6,6"/>
                     </WrapPanel>
 
+                    <Border Background="#123427"
+                            CornerRadius="8"
+                            Padding="8"
+                            Margin="0,0,0,12">
+                        <TextBlock Text="{Binding StatusText, Mode=OneWay}"
+                                   Foreground="#C9FBE6"
+                                   TextWrapping="Wrap"
+                                   FontSize="11"/>
+                    </Border>
+
                     <Separator/>
 
                     <TextBlock Text="Импорт обучающих изображений"

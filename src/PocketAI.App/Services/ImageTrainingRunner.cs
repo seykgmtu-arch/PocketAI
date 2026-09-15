@@ -40,8 +40,14 @@ public sealed class ImageTrainingRunner :
             "Scripts",
             "python.exe");
 
+    public string AccelerateConfigPath =>
+        Path.Combine(
+            TrainingRoot,
+            "accelerate-config.yaml");
+
     public bool IsInstalled =>
         File.Exists(PythonPath) &&
+        File.Exists(AccelerateConfigPath) &&
         File.Exists(
             Path.Combine(
                 TrainingRoot,
@@ -132,6 +138,8 @@ public sealed class ImageTrainingRunner :
         {
             "-m",
             "accelerate.commands.launch",
+            "--config_file",
+            AccelerateConfigPath,
             "--num_processes", "1",
             "--num_machines", "1",
             "--mixed_precision",

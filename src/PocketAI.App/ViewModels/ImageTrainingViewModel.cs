@@ -67,6 +67,18 @@ public sealed class ImageTrainingViewModel :
         Presets = new[]
         {
             new ImageTrainingPreset(
+                "SD 1.5 · FIRST TEST · RTX 3080",
+                ImageTrainingModelFamily.Sd15,
+                512,
+                8,
+                8,
+                4,
+                5,
+                1e-4,
+                "AdamW",
+                "fp16"),
+
+            new ImageTrainingPreset(
                 "SDXL · RTX 3080 · balanced",
                 ImageTrainingModelFamily.Sdxl,
                 1024,
@@ -105,6 +117,14 @@ public sealed class ImageTrainingViewModel :
 
         _selectedPreset =
             Presets[0];
+
+        _widthText =
+            _selectedPreset.Resolution.ToString(
+                CultureInfo.InvariantCulture);
+
+        _heightText =
+            _selectedPreset.Resolution.ToString(
+                CultureInfo.InvariantCulture);
 
         Items =
             new ObservableCollection<ImageTrainingItem>();
@@ -351,7 +371,7 @@ public sealed class ImageTrainingViewModel :
             new OpenFileDialog
             {
                 Title =
-                    "Выберите базовую модель SD/SDXL",
+                    "Выберите TRAINING checkpoint SD/SDXL (.safetensors/.ckpt, не GGUF)",
                 Filter =
                     "Training checkpoints|*.safetensors;*.ckpt|All files|*.*"
             };

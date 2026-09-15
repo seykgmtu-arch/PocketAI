@@ -1,0 +1,30 @@
+PocketAI TRAINING v2 — FIRST LORA
+================================
+
+ЗАМЕНИТЬ:
+src\PocketAI.App\Services\ImageTrainingRunner.cs
+src\PocketAI.App\ViewModels\ImageTrainingViewModel.cs
+src\PocketAI.App\Views\ImageTrainingView.xaml
+src\PocketAI.App\Views\PerchanceBrowserView.xaml
+scripts\publish-win-x64.ps1
+tools\setup-image-training.ps1
+
+ДОБАВИТЬ:
+src\PocketAI.App\Views\PerchanceBrowserView.PromptSidecar.cs
+tools\download-sd15-training-model.ps1
+tools\verify-image-training.ps1
+INSTALL-TRAINING.cmd
+DOWNLOAD-SD15-TRAINING-MODEL.cmd
+VERIFY-TRAINING.cmd
+FIRST_LORA_RU.md
+presets\image-training\sd15-first-test-rtx3080.json
+presets\image-training\first-lora-prompts-12.txt
+
+НЕ ТРОГАТЬ:
+MainWindow.xaml
+MainWindow.xaml.cs
+ImageTrainingView.xaml.cs
+LOCAL image generator / LoRA 400 fix
+
+После GitHub Actions скачайте НОВЫЙ artifact.
+В новом artifact должны присутствовать INSTALL-TRAINING.cmd и папка tools.

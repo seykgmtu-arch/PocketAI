@@ -1,0 +1,13 @@
+{
+  "name": "SD 1.5 · FIRST TEST · RTX 3080",
+  "family": "Sd15",
+  "resolution": 512,
+  "rank": 8,
+  "alpha": 8,
+  "epochs": 4,
+  "repeats": 5,
+  "learningRate": 0.0001,
+  "optimizer": "AdamW",
+  "mixedPrecision": "fp16",
+  "purpose": "First end-to-end LoRA training validation on 10-20 images"
+}

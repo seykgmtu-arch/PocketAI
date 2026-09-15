@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
@@ -30,7 +31,6 @@ public sealed class DiagnosticReportService
         _baseDirectory = Path.GetFullPath(baseDirectory);
     }
 
-    // Compatibility overload used by existing self-tests and older callers.
     public Task<string> CreateAsync(
         PocketAiConfig config,
         HardwareProfile? hardware,
@@ -84,6 +84,7 @@ public sealed class DiagnosticReportService
         using var archive = new ZipArchive(fileStream, ZipArchiveMode.Create, leaveOpen: false);
 
         var assembly = Assembly.GetEntryAssembly();
+
         var embeddingsConfigured =
             config.Embeddings.Enabled &&
             File.Exists(ConfigLoader.ResolvePath(_baseDirectory, config.Embeddings.ModelPath));
@@ -126,15 +127,9 @@ public sealed class DiagnosticReportService
                     {
                         var extension = Path.GetExtension(path);
                         return
-                            extension.Equals(
-                                ".safetensors",
-                                StringComparison.OrdinalIgnoreCase) ||
-                            extension.Equals(
-                                ".ckpt",
-                                StringComparison.OrdinalIgnoreCase) ||
-                            extension.Equals(
-                                ".gguf",
-                                StringComparison.OrdinalIgnoreCase);
+                            extension.Equals(".safetensors", StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(".ckpt", StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(".gguf", StringComparison.OrdinalIgnoreCase);
                     })
                 : 0;
 
@@ -143,6 +138,12 @@ public sealed class DiagnosticReportService
         var imageServerUsesLoopback =
             Uri.TryCreate(config.Images.ServerUrl, UriKind.Absolute, out var imageServerUri) &&
             imageServerUri.IsLoopback;
+
+        var trainingSnapshot =
+            BuildTrainingSnapshot();
+
+        var nvidiaSnapshot =
+            await TryGetNvidiaSmiSnapshotAsync(cancellationToken);
 
         var report = new
         {
@@ -179,6 +180,15 @@ public sealed class DiagnosticReportService
                 hardware?.HasNvidiaGpu == true ? "SDXL 1024" : "SD 1.5 Fast 512",
             imageProfilesSupported =
                 new[] { "SD 1.5 Fast 512", "SDXL 1024" },
+
+            trainingRuntimeReady = trainingSnapshot.RuntimeReady,
+            trainingCheckpointCount = trainingSnapshot.TrainingCheckpointCount,
+            loraCount = trainingSnapshot.LoraCount,
+            trainingProjectCount = trainingSnapshot.ProjectCount,
+            nvidiaSmiAvailable = nvidiaSnapshot.Available,
+            nvidiaReportedVramMiB = nvidiaSnapshot.TotalMemoryMiB,
+            nvidiaFreeVramMiB = nvidiaSnapshot.FreeMemoryMiB,
+
             embeddingProvider = embeddingsConfigured
                 ? "Qwen3-Embedding GGUF via llama.cpp"
                 : "not configured",
@@ -202,12 +212,16 @@ public sealed class DiagnosticReportService
                 queryTextIncluded = false,
                 sourceSnippetsIncluded = false,
                 rawLogsIncluded = false,
-                systemPromptIncluded = false
+                systemPromptIncluded = false,
+                trainingCaptionsIncluded = false,
+                trainingImageNamesIncluded = false,
+                trainingPromptTextIncluded = false
             }
         };
 
         AddJson(archive, "report.json", report);
         AddJson(archive, "hardware.json", hardware);
+
         AddJson(
             archive,
             "models.json",
@@ -219,6 +233,46 @@ public sealed class DiagnosticReportService
                         model.SizeBytes,
                         model.LastWriteTimeUtc
                     }));
+
+        AddJson(
+            archive,
+            "training.json",
+            new
+            {
+                trainingSnapshot.RuntimeDirectoryExists,
+                trainingSnapshot.PythonVenvExists,
+                trainingSnapshot.TrainNetworkScriptExists,
+                trainingSnapshot.SdxlTrainNetworkScriptExists,
+                trainingSnapshot.AccelerateConfigExists,
+                trainingSnapshot.RuntimeInfoExists,
+                trainingSnapshot.RuntimeReady,
+                trainingSnapshot.TrainingModelsDirectoryExists,
+                trainingSnapshot.TrainingCheckpointCount,
+                trainingSnapshot.Sd15CheckpointPresent,
+                trainingSnapshot.LoraDirectoryExists,
+                trainingSnapshot.LoraCount,
+                trainingSnapshot.ProjectsDirectoryExists,
+                trainingSnapshot.ProjectCount,
+                trainingSnapshot.TrainingLogCount,
+                note =
+                    "Training prompts, captions, image names, project names and raw logs are omitted."
+            });
+
+        AddJson(
+            archive,
+            "nvidia.json",
+            new
+            {
+                nvidiaSnapshot.Available,
+                nvidiaSnapshot.DriverVersion,
+                nvidiaSnapshot.GpuName,
+                nvidiaSnapshot.TotalMemoryMiB,
+                nvidiaSnapshot.FreeMemoryMiB,
+                nvidiaSnapshot.TemperatureC,
+                nvidiaSnapshot.UtilizationPercent,
+                note =
+                    "nvidia-smi values are preferred over WMI AdapterRAM for modern GPUs."
+            });
 
         var sanitizedConfig = new
         {
@@ -258,6 +312,11 @@ public sealed class DiagnosticReportService
                 !string.IsNullOrWhiteSpace(config.Images.OutputDirectory),
             imageWidth = config.Images.Width,
             imageHeight = config.Images.Height,
+
+            trainingRuntimeReady = trainingSnapshot.RuntimeReady,
+            trainingCheckpointCount = trainingSnapshot.TrainingCheckpointCount,
+            loraCount = trainingSnapshot.LoraCount,
+
             systemPrompt = "[omitted]"
         };
 
@@ -270,28 +329,326 @@ public sealed class DiagnosticReportService
             {
                 capturedServerCharacters = recentServerOutput.Length,
                 capturedServerLines = recentServerOutput.Count(c => c == '\n'),
+                trainingLogCount = trainingSnapshot.TrainingLogCount,
                 note =
-                    "Raw logs, prompts, queries, source names and document text are omitted."
+                    "Raw logs, prompts, captions, queries, source names and document text are omitted."
             });
 
         AddText(archive, "tree.txt", BuildSafeTree());
         return outputPath;
     }
 
-    private static void AddJson<T>(ZipArchive archive, string name, T value)
+    private TrainingDiagnosticSnapshot BuildTrainingSnapshot()
     {
-        var json = JsonSerializer.Serialize(value, JsonOptions);
-        AddText(archive, name, json);
+        var runtimeDirectory =
+            Path.Combine(
+                _baseDirectory,
+                "runtime",
+                "image",
+                "training",
+                "sd-scripts");
+
+        var pythonPath =
+            Path.Combine(
+                runtimeDirectory,
+                "venv",
+                "Scripts",
+                "python.exe");
+
+        var trainNetwork =
+            Path.Combine(
+                runtimeDirectory,
+                "train_network.py");
+
+        var sdxlTrainNetwork =
+            Path.Combine(
+                runtimeDirectory,
+                "sdxl_train_network.py");
+
+        var accelerateConfig =
+            Path.Combine(
+                runtimeDirectory,
+                "accelerate-config.yaml");
+
+        var runtimeInfo =
+            Path.Combine(
+                _baseDirectory,
+                "runtime",
+                "image",
+                "training",
+                "runtime-info.txt");
+
+        var trainingModelsDirectory =
+            Path.Combine(
+                _baseDirectory,
+                "models",
+                "training");
+
+        var trainingCheckpointCount =
+            CountFilesSafe(
+                trainingModelsDirectory,
+                path =>
+                {
+                    var extension =
+                        Path.GetExtension(path);
+
+                    return
+                        extension.Equals(
+                            ".safetensors",
+                            StringComparison.OrdinalIgnoreCase) ||
+                        extension.Equals(
+                            ".ckpt",
+                            StringComparison.OrdinalIgnoreCase);
+                });
+
+        var sd15Checkpoint =
+            Path.Combine(
+                trainingModelsDirectory,
+                "sd15",
+                "v1-5-pruned.safetensors");
+
+        var loraDirectory =
+            Path.Combine(
+                _baseDirectory,
+                "models",
+                "images",
+                "loras");
+
+        var loraCount =
+            CountFilesSafe(
+                loraDirectory,
+                path =>
+                    Path.GetExtension(path).Equals(
+                        ".safetensors",
+                        StringComparison.OrdinalIgnoreCase));
+
+        var projectsDirectory =
+            Path.Combine(
+                _baseDirectory,
+                "training",
+                "image",
+                "projects");
+
+        var projectCount =
+            CountDirectoriesSafe(
+                projectsDirectory);
+
+        var trainingLogCount =
+            Directory.Exists(projectsDirectory)
+                ? Directory
+                    .EnumerateFiles(
+                        projectsDirectory,
+                        "*.log",
+                        SearchOption.AllDirectories)
+                    .Take(10000)
+                    .Count()
+                : 0;
+
+        var runtimeReady =
+            File.Exists(pythonPath) &&
+            File.Exists(trainNetwork) &&
+            File.Exists(sdxlTrainNetwork) &&
+            File.Exists(accelerateConfig);
+
+        return new TrainingDiagnosticSnapshot(
+            Directory.Exists(runtimeDirectory),
+            File.Exists(pythonPath),
+            File.Exists(trainNetwork),
+            File.Exists(sdxlTrainNetwork),
+            File.Exists(accelerateConfig),
+            File.Exists(runtimeInfo),
+            runtimeReady,
+            Directory.Exists(trainingModelsDirectory),
+            trainingCheckpointCount,
+            File.Exists(sd15Checkpoint),
+            Directory.Exists(loraDirectory),
+            loraCount,
+            Directory.Exists(projectsDirectory),
+            projectCount,
+            trainingLogCount);
     }
 
-    private static void AddText(ZipArchive archive, string name, string content)
+    private static int CountFilesSafe(
+        string directory,
+        Func<string, bool> predicate)
     {
-        var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
-        using var stream = entry.Open();
+        if (!Directory.Exists(directory))
+            return 0;
+
+        try
+        {
+            return Directory
+                .EnumerateFiles(
+                    directory,
+                    "*",
+                    SearchOption.AllDirectories)
+                .Take(10000)
+                .Count(predicate);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static int CountDirectoriesSafe(
+        string directory)
+    {
+        if (!Directory.Exists(directory))
+            return 0;
+
+        try
+        {
+            return Directory
+                .EnumerateDirectories(
+                    directory,
+                    "*",
+                    SearchOption.TopDirectoryOnly)
+                .Take(10000)
+                .Count();
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static async Task<NvidiaSmiSnapshot> TryGetNvidiaSmiSnapshotAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var psi =
+                new ProcessStartInfo
+                {
+                    FileName = "nvidia-smi.exe",
+                    Arguments =
+                        "--query-gpu=name,driver_version,memory.total,memory.free,temperature.gpu,utilization.gpu " +
+                        "--format=csv,noheader,nounits",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+            using var process =
+                new Process
+                {
+                    StartInfo = psi
+                };
+
+            if (!process.Start())
+                return NvidiaSmiSnapshot.Empty;
+
+            var outputTask =
+                process.StandardOutput.ReadToEndAsync(
+                    cancellationToken);
+
+            var errorTask =
+                process.StandardError.ReadToEndAsync(
+                    cancellationToken);
+
+            using var timeoutCts =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken);
+
+            timeoutCts.CancelAfter(
+                TimeSpan.FromSeconds(5));
+
+            await process.WaitForExitAsync(
+                timeoutCts.Token);
+
+            var output =
+                await outputTask;
+
+            _ =
+                await errorTask;
+
+            if (process.ExitCode != 0 ||
+                string.IsNullOrWhiteSpace(output))
+            {
+                return NvidiaSmiSnapshot.Empty;
+            }
+
+            var line =
+                output
+                    .Split(
+                        new[] { '\r', '\n' },
+                        StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(line))
+                return NvidiaSmiSnapshot.Empty;
+
+            var parts =
+                line
+                    .Split(',')
+                    .Select(
+                        part => part.Trim())
+                    .ToArray();
+
+            if (parts.Length < 6)
+                return NvidiaSmiSnapshot.Empty;
+
+            static int? ParseInt(
+                string value)
+            {
+                return int.TryParse(
+                    value,
+                    out var parsed)
+                    ? parsed
+                    : null;
+            }
+
+            return new NvidiaSmiSnapshot(
+                true,
+                parts[1],
+                parts[0],
+                ParseInt(parts[2]),
+                ParseInt(parts[3]),
+                ParseInt(parts[4]),
+                ParseInt(parts[5]));
+        }
+        catch
+        {
+            return NvidiaSmiSnapshot.Empty;
+        }
+    }
+
+    private static void AddJson<T>(
+        ZipArchive archive,
+        string name,
+        T value)
+    {
+        var json =
+            JsonSerializer.Serialize(
+                value,
+                JsonOptions);
+
+        AddText(
+            archive,
+            name,
+            json);
+    }
+
+    private static void AddText(
+        ZipArchive archive,
+        string name,
+        string content)
+    {
+        var entry =
+            archive.CreateEntry(
+                name,
+                CompressionLevel.Optimal);
+
+        using var stream =
+            entry.Open();
+
         using var writer =
             new StreamWriter(
                 stream,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                new UTF8Encoding(
+                    encoderShouldEmitUTF8Identifier: false));
 
         writer.Write(content);
     }
@@ -299,7 +656,8 @@ public sealed class DiagnosticReportService
     private string BuildSafeTree()
     {
         var builder =
-            new StringBuilder("File contents and unrecognized names are omitted.\n");
+            new StringBuilder(
+                "File contents and unrecognized names are omitted.\n");
 
         var directories = new[]
         {
@@ -311,13 +669,21 @@ public sealed class DiagnosticReportService
             "runtime/image",
             "runtime/image/cuda",
             "runtime/image/cpu",
+            "runtime/image/training",
+            "runtime/image/training/sd-scripts",
             "models/images",
+            "models/images/loras",
+            "models/training",
+            "models/training/sd15",
+            "training/image/projects",
             "outputs/images",
+            "outputs/perchance",
             "logs"
         };
 
         var knownFiles =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
             {
                 "PocketAI.exe",
                 "PocketAI.dll",
@@ -326,18 +692,29 @@ public sealed class DiagnosticReportService
                 "pocketai.json",
                 "assets.lock.json",
                 "llama-server.exe",
-                "sd-server.exe"
+                "sd-server.exe",
+                "python.exe",
+                "train_network.py",
+                "sdxl_train_network.py",
+                "accelerate-config.yaml",
+                "runtime-info.txt"
             };
 
         foreach (var relative in directories)
         {
-            var directory = Path.Combine(_baseDirectory, relative);
+            var directory =
+                Path.Combine(
+                    _baseDirectory,
+                    relative);
 
             if (!Directory.Exists(directory))
                 continue;
 
-            var cursor = new DirectoryInfo(directory);
-            var linked = false;
+            var cursor =
+                new DirectoryInfo(directory);
+
+            var linked =
+                false;
 
             while (cursor is not null &&
                    cursor.FullName.StartsWith(
@@ -345,21 +722,32 @@ public sealed class DiagnosticReportService
                        StringComparison.OrdinalIgnoreCase))
             {
                 linked |=
-                    (cursor.Attributes & FileAttributes.ReparsePoint) != 0;
-                cursor = cursor.Parent;
+                    (cursor.Attributes &
+                     FileAttributes.ReparsePoint) != 0;
+
+                cursor =
+                    cursor.Parent;
             }
 
             if (linked)
                 continue;
 
-            builder.AppendLine(relative + "/");
+            builder.AppendLine(
+                relative + "/");
 
-            foreach (var path in Directory.EnumerateFiles(directory).Take(1000))
+            foreach (var path in
+                     Directory
+                         .EnumerateFiles(directory)
+                         .Take(1000))
             {
-                var info = new FileInfo(path);
+                var info =
+                    new FileInfo(path);
 
-                if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                if ((info.Attributes &
+                     FileAttributes.ReparsePoint) != 0)
+                {
                     continue;
+                }
 
                 var name =
                     knownFiles.Contains(info.Name)
@@ -376,5 +764,42 @@ public sealed class DiagnosticReportService
         }
 
         return builder.ToString();
+    }
+
+    private sealed record TrainingDiagnosticSnapshot(
+        bool RuntimeDirectoryExists,
+        bool PythonVenvExists,
+        bool TrainNetworkScriptExists,
+        bool SdxlTrainNetworkScriptExists,
+        bool AccelerateConfigExists,
+        bool RuntimeInfoExists,
+        bool RuntimeReady,
+        bool TrainingModelsDirectoryExists,
+        int TrainingCheckpointCount,
+        bool Sd15CheckpointPresent,
+        bool LoraDirectoryExists,
+        int LoraCount,
+        bool ProjectsDirectoryExists,
+        int ProjectCount,
+        int TrainingLogCount);
+
+    private sealed record NvidiaSmiSnapshot(
+        bool Available,
+        string? DriverVersion,
+        string? GpuName,
+        int? TotalMemoryMiB,
+        int? FreeMemoryMiB,
+        int? TemperatureC,
+        int? UtilizationPercent)
+    {
+        public static NvidiaSmiSnapshot Empty =>
+            new(
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 }
