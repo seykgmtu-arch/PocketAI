@@ -6,6 +6,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+if ([string]::IsNullOrWhiteSpace($PocketAIRoot)) {
+    $PocketAIRoot = Split-Path -Parent $PSScriptRoot
+}
+
+# powershell.exe + a quoted path ending with "\" may leave a literal quote
+# in a parameter on some Windows command-line combinations.
+$PocketAIRoot = $PocketAIRoot.Trim().Trim([char]34)
 $root = [System.IO.Path]::GetFullPath($PocketAIRoot)
 $modelDirectory = Join-Path $root 'models\training\sd15'
 $modelPath = Join-Path $modelDirectory 'v1-5-pruned.safetensors'

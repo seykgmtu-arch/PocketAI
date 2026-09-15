@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -12,6 +14,7 @@ public partial class PerchanceBrowserView
 {
     private bool _promptSidecarHookRequested;
     private CoreWebView2? _promptSidecarCore;
+    private readonly List<CoreWebView2Frame> _promptFrames = new();
 
     private void PerchancePromptSidecar_OnLoaded(
         object sender,
@@ -60,6 +63,9 @@ public partial class PerchanceBrowserView
         {
             _promptSidecarCore.DownloadStarting -=
                 PromptSidecar_DownloadStarting;
+
+            _promptSidecarCore.FrameCreated -=
+                PromptSidecar_FrameCreated;
         }
 
         _promptSidecarCore =
@@ -67,6 +73,71 @@ public partial class PerchanceBrowserView
 
         core.DownloadStarting +=
             PromptSidecar_DownloadStarting;
+
+        core.FrameCreated +=
+            PromptSidecar_FrameCreated;
+    }
+
+    private void PromptSidecar_FrameCreated(
+        object? sender,
+        CoreWebView2FrameCreatedEventArgs e)
+    {
+        var frame =
+            e.Frame;
+
+        _promptFrames.Add(
+            frame);
+
+        frame.Destroyed +=
+            (_, _) =>
+            {
+                try
+                {
+                    _promptFrames.Remove(
+                        frame);
+                }
+                catch
+                {
+                }
+            };
+    }
+
+    private void PromptSidecarPaste_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        try
+        {
+            if (Clipboard.ContainsText())
+            {
+                PromptSidecarBox.Text =
+                    Clipboard.GetText().Trim();
+
+                StatusText.Text =
+                    "Prompt для TXT взят из буфера обмена.";
+            }
+            else
+            {
+                StatusText.Text =
+                    "В буфере обмена нет текста.";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text =
+                "Не удалось прочитать буфер: " +
+                ex.GetBaseException().Message;
+        }
+    }
+
+    private void PromptSidecarClear_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        PromptSidecarBox.Clear();
+
+        StatusText.Text =
+            "Резервный prompt очищен.";
     }
 
     private void PromptSidecar_DownloadStarting(
@@ -76,9 +147,7 @@ public partial class PerchanceBrowserView
         var operation =
             e.DownloadOperation;
 
-        // Start prompt detection immediately. The existing PocketAI download
-        // handler may still change ResultFilePath; at completion we read the
-        // final path from DownloadOperation.ResultFilePath.
+        // Capture immediately, while the page still reflects the image being downloaded.
         var promptTask =
             CaptureCurrentPromptAsync();
 
@@ -113,13 +182,15 @@ public partial class PerchanceBrowserView
 
     private async Task SavePromptSidecarAfterDownloadAsync(
         CoreWebView2DownloadOperation operation,
-        Task<string> promptTask)
+        Task<PromptCaptureResult> promptTask)
     {
         try
         {
+            var result =
+                await promptTask;
+
             var prompt =
-                (await promptTask)
-                .Trim();
+                result.Prompt.Trim();
 
             if (string.IsNullOrWhiteSpace(
                     prompt))
@@ -128,7 +199,8 @@ public partial class PerchanceBrowserView
                     () =>
                     {
                         StatusText.Text =
-                            "Картинка сохранена, но prompt автоматически не найден.";
+                            "Картинка сохранена, но prompt не найден. " +
+                            "Перед Download вставьте его в поле «Prompt для TXT».";
                     });
 
                 return;
@@ -158,8 +230,13 @@ public partial class PerchanceBrowserView
             await Dispatcher.InvokeAsync(
                 () =>
                 {
+                    PromptSidecarBox.Text =
+                        prompt;
+
                     StatusText.Text =
-                        "Сохранено изображение + prompt.txt: " +
+                        "Сохранено изображение + TXT prompt (" +
+                        result.Source +
+                        "): " +
                         Path.GetFileName(
                             imagePath);
                 });
@@ -176,34 +253,218 @@ public partial class PerchanceBrowserView
         }
     }
 
-    private async Task<string> CaptureCurrentPromptAsync()
+    private async Task<PromptCaptureResult> CaptureCurrentPromptAsync()
+    {
+        // 1. Automatic DOM probe: top document + WebView2 frames.
+        var automatic =
+            await ProbeAllDocumentsAsync();
+
+        if (!string.IsNullOrWhiteSpace(
+                automatic.Prompt))
+        {
+            return automatic;
+        }
+
+        // 2. Explicit fallback field in PocketAI.
+        var manual =
+            PromptSidecarBox.Text?.Trim() ??
+            string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(
+                manual))
+        {
+            return new PromptCaptureResult(
+                manual,
+                "поле PocketAI");
+        }
+
+        // 3. Clipboard fallback. This works especially well with
+        // Training -> "Копировать следующий промт".
+        try
+        {
+            if (Clipboard.ContainsText())
+            {
+                var clipboard =
+                    Clipboard.GetText().Trim();
+
+                if (clipboard.Length >= 3 &&
+                    !Uri.TryCreate(
+                        clipboard,
+                        UriKind.Absolute,
+                        out _))
+                {
+                    return new PromptCaptureResult(
+                        clipboard,
+                        "буфер обмена");
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return PromptCaptureResult.Empty;
+    }
+
+    private async Task<PromptCaptureResult> ProbeAllDocumentsAsync()
+    {
+        var candidates =
+            new List<PromptCandidate>();
+
+        if (Browser.CoreWebView2 is not null)
+        {
+            var top =
+                await TryProbeTopAsync();
+
+            if (top is not null)
+                candidates.Add(top);
+        }
+
+        var frames =
+            _promptFrames.ToArray();
+
+        foreach (var frame in frames)
+        {
+            var candidate =
+                await TryProbeFrameAsync(
+                    frame);
+
+            if (candidate is not null)
+                candidates.Add(candidate);
+        }
+
+        var best =
+            candidates
+                .Where(
+                    item =>
+                        !string.IsNullOrWhiteSpace(
+                            item.Value))
+                .OrderByDescending(
+                    item => item.Score)
+                .ThenByDescending(
+                    item => item.Value.Length)
+                .FirstOrDefault();
+
+        return best is null
+            ? PromptCaptureResult.Empty
+            : new PromptCaptureResult(
+                best.Value,
+                best.Source);
+    }
+
+    private async Task<PromptCandidate?> TryProbeTopAsync()
     {
         try
         {
             if (Browser.CoreWebView2 is null)
-                return string.Empty;
+                return null;
 
             var json =
                 await Browser.CoreWebView2
                     .ExecuteScriptAsync(
                         PromptProbeScript);
 
-            if (string.IsNullOrWhiteSpace(
-                    json))
-            {
-                return string.Empty;
-            }
-
-            return
-                JsonSerializer.Deserialize<string>(
-                    json) ??
-                string.Empty;
+            return ParseCandidate(
+                json,
+                "страница");
         }
         catch
         {
-            return string.Empty;
+            return null;
         }
     }
+
+    private async Task<PromptCandidate?> TryProbeFrameAsync(
+        CoreWebView2Frame frame)
+    {
+        try
+        {
+            var json =
+                await frame.ExecuteScriptAsync(
+                    PromptProbeScript);
+
+            return ParseCandidate(
+                json,
+                "frame");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static PromptCandidate? ParseCandidate(
+        string? json,
+        string source)
+    {
+        if (string.IsNullOrWhiteSpace(
+                json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document =
+                JsonDocument.Parse(
+                    json);
+
+            var root =
+                document.RootElement;
+
+            if (root.ValueKind !=
+                JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var value =
+                root.TryGetProperty(
+                    "value",
+                    out var valueElement)
+                    ? valueElement.GetString()
+                    : null;
+
+            var score =
+                root.TryGetProperty(
+                    "score",
+                    out var scoreElement) &&
+                scoreElement.TryGetInt32(
+                    out var parsed)
+                    ? parsed
+                    : 0;
+
+            if (string.IsNullOrWhiteSpace(
+                    value))
+            {
+                return null;
+            }
+
+            return new PromptCandidate(
+                value.Trim(),
+                score,
+                source);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed record PromptCaptureResult(
+        string Prompt,
+        string Source)
+    {
+        public static PromptCaptureResult Empty =>
+            new(
+                string.Empty,
+                "не найден");
+    }
+
+    private sealed record PromptCandidate(
+        string Value,
+        int Score,
+        string Source);
 
     private const string PromptProbeScript = """
 (() => {
@@ -211,12 +472,21 @@ public partial class PerchanceBrowserView
 
   function readValue(el) {
     if (!el) return '';
-    if (typeof el.value === 'string') return el.value.trim();
-    if (el.isContentEditable) return (el.innerText || el.textContent || '').trim();
+
+    if (typeof el.value === 'string') {
+      return el.value.trim();
+    }
+
+    if (el.isContentEditable) {
+      return (el.innerText || el.textContent || '').trim();
+    }
+
     return '';
   }
 
   function add(el, bonus = 0) {
+    if (!el) return;
+
     const value = readValue(el);
     if (!value || value.length < 3) return;
 
@@ -225,42 +495,47 @@ public partial class PerchanceBrowserView
       el.getAttribute?.('aria-label') || '',
       el.getAttribute?.('name') || '',
       el.getAttribute?.('id') || '',
-      el.className || ''
+      typeof el.className === 'string' ? el.className : ''
     ].join(' ').toLowerCase();
 
     let score = bonus;
 
-    if (el === el.ownerDocument.activeElement) score += 80;
-    if (el.tagName === 'TEXTAREA') score += 30;
-    if (/prompt|describe|description|what|draw|image|idea|scene/.test(meta)) score += 60;
-    if (/negative|exclude|avoid/.test(meta)) score -= 120;
+    if (el === document.activeElement) score += 90;
+    if (el.tagName === 'TEXTAREA') score += 35;
+    if (el.isContentEditable) score += 25;
+
+    if (/prompt|describe|description|what|draw|image|idea|scene|positive/.test(meta)) {
+      score += 80;
+    }
+
+    if (/negative|exclude|avoid|seed|style|width|height/.test(meta)) {
+      score -= 140;
+    }
+
     if (value.length >= 20) score += 10;
     if (value.length >= 60) score += 10;
+    if (value.length >= 4000) score -= 100;
 
-    candidates.push({ value, score });
+    candidates.push({
+      value,
+      score
+    });
   }
 
-  function scanDocument(doc) {
-    try {
-      add(doc.activeElement, 100);
+  add(document.activeElement, 110);
 
-      doc.querySelectorAll(
-        'textarea, input[type="text"], input:not([type]), [contenteditable="true"]'
-      ).forEach(el => add(el));
+  document.querySelectorAll(
+    'textarea, input[type="text"], input:not([type]), [contenteditable="true"]'
+  ).forEach(el => add(el));
 
-      doc.querySelectorAll('iframe').forEach(frame => {
-        try {
-          if (frame.contentDocument) scanDocument(frame.contentDocument);
-        } catch {}
-      });
-    } catch {}
-  }
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.value.length - a.value.length;
+  });
 
-  scanDocument(document);
-
-  candidates.sort((a, b) => b.score - a.score);
-
-  return candidates.length ? candidates[0].value : '';
+  return candidates.length
+    ? candidates[0]
+    : { value: '', score: -9999 };
 })()
 """;
 }

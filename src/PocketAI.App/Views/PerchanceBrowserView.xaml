@@ -8,6 +8,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -81,6 +82,49 @@
         </Border>
 
         <Border Grid.Row="1"
+                Background="#0E1728"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="9"
+                Padding="9"
+                Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           Text="Prompt для TXT:"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"
+                           Margin="0,0,8,0"/>
+
+                <TextBox x:Name="PromptSidecarBox"
+                         Grid.Column="1"
+                         MinWidth="280"
+                         TextWrapping="NoWrap"
+                         Padding="7"
+                         Margin="0,0,8,0"
+                         ToolTip="Резервный prompt. При Download PocketAI сначала ищет prompt в странице/frame, затем использует это поле, затем буфер обмена."/>
+
+                <Button Grid.Column="2"
+                        Content="Из буфера"
+                        Click="PromptSidecarPaste_OnClick"
+                        Padding="10,6"
+                        Margin="0,0,6,0"/>
+
+                <Button Grid.Column="3"
+                        Content="Очистить"
+                        Click="PromptSidecarClear_OnClick"
+                        Background="#475569"
+                        Padding="10,6"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2"
                 Background="#101A2E"
                 CornerRadius="9"
                 Padding="9"
@@ -96,7 +140,7 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource PanelBorderBrush}"
                 BorderThickness="1"
