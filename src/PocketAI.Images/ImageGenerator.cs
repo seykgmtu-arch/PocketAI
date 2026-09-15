@@ -1,11 +1,18 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace PocketAI.Images;
 
 public sealed record ImageLoraSelection(
     string ApiPath,
     double Weight);
+
+internal sealed record ImageLoraPayload(
+    [property: JsonPropertyName("path")]
+    string Path,
+    [property: JsonPropertyName("multiplier")]
+    double Multiplier);
 
 public sealed record ImageGenerationRequest(
     string Prompt,
@@ -285,23 +292,16 @@ public sealed class ImageGenerator : IDisposable
                     size.Width,
                     size.Height);
 
+        // IMPORTANT:
+        // stable-diffusion.cpp refreshes its internal LoRA cache when
+        // GET /sdapi/v1/loras is called. PocketAI may discover a LoRA
+        // directly from disk before the server has refreshed that cache.
+        // Resolve against the server immediately before txt2img so the
+        // structured lora.path value is guaranteed to be accepted.
         var loras =
-            request.Loras?
-                .Where(
-                    x =>
-                        !string.IsNullOrWhiteSpace(
-                            x.ApiPath))
-                .Select(
-                    x => new
-                    {
-                        path = x.ApiPath,
-                        multiplier =
-                            Math.Clamp(
-                                x.Weight,
-                                -4.0,
-                                4.0)
-                    })
-                .ToArray();
+            await PrepareLorasAsync(
+                request.Loras,
+                ct);
 
         using var response =
             await _http.PostAsJsonAsync(
@@ -463,6 +463,179 @@ public sealed class ImageGenerator : IDisposable
             size.WasAdjusted,
             size.Message,
             enableHighRes);
+    }
+
+    private async Task<ImageLoraPayload[]?> PrepareLorasAsync(
+        IReadOnlyList<ImageLoraSelection>? requestedLoras,
+        CancellationToken ct)
+    {
+        var requested =
+            requestedLoras?
+                .Where(
+                    x =>
+                        !string.IsNullOrWhiteSpace(
+                            x.ApiPath))
+                .ToArray();
+
+        if (requested is null ||
+            requested.Length == 0)
+        {
+            return null;
+        }
+
+        // This endpoint refreshes stable-diffusion.cpp's LoRA cache.
+        using var discoveryResponse =
+            await _http.GetAsync(
+                "sdapi/v1/loras",
+                ct);
+
+        var discoveryBody =
+            await discoveryResponse.Content
+                .ReadAsStringAsync(ct);
+
+        if (!discoveryResponse.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"Image server LoRA discovery {(int)discoveryResponse.StatusCode}: " +
+                $"{Trim(discoveryBody, 1400)}");
+        }
+
+        using var document =
+            JsonDocument.Parse(
+                discoveryBody);
+
+        if (document.RootElement.ValueKind !=
+            JsonValueKind.Array)
+        {
+            throw new InvalidDataException(
+                "Image server вернул неверный формат /sdapi/v1/loras.");
+        }
+
+        var serverPaths =
+            new List<string>();
+
+        foreach (var item in
+                 document.RootElement
+                     .EnumerateArray())
+        {
+            if (!item.TryGetProperty(
+                    "path",
+                    out var pathElement) ||
+                pathElement.ValueKind !=
+                    JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var path =
+                pathElement.GetString();
+
+            if (!string.IsNullOrWhiteSpace(
+                    path))
+            {
+                serverPaths.Add(
+                    path);
+            }
+        }
+
+        if (serverPaths.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "LoRA выбрана в PocketAI, но sd-server не видит ни одной LoRA. " +
+                "Проверьте models\\images\\loras и запуск сервера с --lora-model-dir.");
+        }
+
+        var result =
+            new List<ImageLoraPayload>(
+                requested.Length);
+
+        foreach (var requestedLora in requested)
+        {
+            var requestedPath =
+                NormalizeApiPath(
+                    requestedLora.ApiPath);
+
+            var resolved =
+                serverPaths.FirstOrDefault(
+                    serverPath =>
+                        string.Equals(
+                            NormalizeApiPath(
+                                serverPath),
+                            requestedPath,
+                            StringComparison.OrdinalIgnoreCase));
+
+            // Fallback only for a single unambiguous filename match.
+            if (resolved is null)
+            {
+                var requestedName =
+                    GetApiFileName(
+                        requestedPath);
+
+                var filenameMatches =
+                    serverPaths
+                        .Where(
+                            serverPath =>
+                                string.Equals(
+                                    GetApiFileName(
+                                        NormalizeApiPath(
+                                            serverPath)),
+                                    requestedName,
+                                    StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+
+                if (filenameMatches.Length == 1)
+                {
+                    resolved =
+                        filenameMatches[0];
+                }
+            }
+
+            if (resolved is null)
+            {
+                var visible =
+                    string.Join(
+                        ", ",
+                        serverPaths.Take(8));
+
+                throw new InvalidOperationException(
+                    $"LoRA «{requestedLora.ApiPath}» не найдена в кэше sd-server. " +
+                    $"Сервер видит: {visible}");
+            }
+
+            result.Add(
+                new ImageLoraPayload(
+                    resolved,
+                    Math.Clamp(
+                        requestedLora.Weight,
+                        -4.0,
+                        4.0)));
+        }
+
+        return result.ToArray();
+    }
+
+    private static string NormalizeApiPath(
+        string path)
+    {
+        return path
+            .Trim()
+            .Replace('\\', '/')
+            .TrimStart('/');
+    }
+
+    private static string GetApiFileName(
+        string path)
+    {
+        var normalized =
+            NormalizeApiPath(
+                path);
+
+        var slash =
+            normalized.LastIndexOf('/');
+
+        return slash >= 0
+            ? normalized[(slash + 1)..]
+            : normalized;
     }
 
     private static string Trim(
