@@ -1,0 +1,303 @@
+<UserControl x:Class="PocketAI.App.Views.ImageTrainingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent">
+
+    <Grid Margin="12">
+
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="420"/>
+            <ColumnDefinition Width="14"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="14"
+                Padding="16">
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+
+                <StackPanel>
+
+                    <TextBlock Text="LoRA Training"
+                               FontSize="22"
+                               FontWeight="Bold"/>
+
+                    <TextBlock Text="Датасет → caption → sd-scripts → models/images/loras"
+                               Margin="0,4,0,14"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               TextWrapping="Wrap"/>
+
+                    <TextBlock Text="{Binding RuntimeStatus}"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Margin="0,0,0,12"/>
+
+                    <TextBlock Text="Проект"
+                               FontWeight="SemiBold"/>
+
+                    <TextBox Text="{Binding ProjectName,UpdateSourceTrigger=PropertyChanged}"
+                             Margin="0,5,0,8"
+                             Padding="7"/>
+
+                    <TextBlock Text="Trigger word"
+                               FontWeight="SemiBold"/>
+
+                    <TextBox Text="{Binding TriggerWord,UpdateSourceTrigger=PropertyChanged}"
+                             Margin="0,5,0,8"
+                             Padding="7"/>
+
+                    <TextBlock Text="Training preset"
+                               FontWeight="SemiBold"/>
+
+                    <ComboBox ItemsSource="{Binding Presets}"
+                              SelectedItem="{Binding SelectedPreset}"
+                              Margin="0,5,0,8"/>
+
+                    <TextBlock Text="Базовая модель"
+                               FontWeight="SemiBold"/>
+
+                    <Grid Margin="0,5,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox Text="{Binding BaseModelPath,UpdateSourceTrigger=PropertyChanged}"
+                                 Padding="7"
+                                 Margin="0,0,6,0"/>
+
+                        <Button Grid.Column="1"
+                                Content="..."
+                                Command="{Binding BrowseBaseModelCommand}"
+                                Padding="10,6"/>
+                    </Grid>
+
+                    <Button Content="Создать / открыть проект"
+                            Command="{Binding CreateProjectCommand}"
+                            Margin="0,0,0,14"/>
+
+                    <Separator/>
+
+                    <TextBlock Text="Промты для внешнего генератора"
+                               FontWeight="SemiBold"
+                               Margin="0,12,0,0"/>
+
+                    <TextBlock Text="Одна строка = одна обучающая картинка. PocketAI экспортирует prompts.csv."
+                               TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="11"
+                               Margin="0,4,0,5"/>
+
+                    <TextBox Text="{Binding PromptPlan,UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="120"
+                             MaxHeight="220"
+                             VerticalScrollBarVisibility="Auto"
+                             Padding="8"/>
+
+                    <TextBlock Text="Negative prompt"
+                               FontWeight="SemiBold"
+                               Margin="0,8,0,0"/>
+
+                    <TextBox Text="{Binding NegativePrompt,UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="50"
+                             Padding="7"
+                             Margin="0,5,0,8"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="Width"/>
+                            <TextBox Text="{Binding WidthText,UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,4,0,0"
+                                     Padding="7"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Height"/>
+                            <TextBox Text="{Binding HeightText,UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,4,0,0"
+                                     Padding="7"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <WrapPanel Margin="0,0,0,12">
+                        <Button Content="Построить список"
+                                Command="{Binding BuildPromptPlanCommand}"
+                                Margin="0,0,6,6"/>
+
+                        <Button Content="Экспорт prompts.csv"
+                                Command="{Binding ExportPromptsCommand}"
+                                Margin="0,0,6,6"/>
+
+                        <Button Content="Импорт prompts.csv"
+                                Command="{Binding ImportPromptsCommand}"
+                                Margin="0,0,6,6"/>
+
+                        <Button Content="Копировать следующий промт"
+                                Command="{Binding CopyNextPromptCommand}"
+                                Margin="0,0,6,6"/>
+                    </WrapPanel>
+
+                    <Separator/>
+
+                    <TextBlock Text="Импорт обучающих изображений"
+                               FontWeight="SemiBold"
+                               Margin="0,12,0,0"/>
+
+                    <TextBlock Text="Если рядом с картинкой есть одноимённый .txt — он станет caption. Иначе PocketAI сопоставит имя с prompts.csv или применит caption ниже."
+                               TextWrapping="Wrap"
+                               FontSize="11"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Margin="0,4,0,5"/>
+
+                    <TextBox Text="{Binding DefaultCaption,UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="60"
+                             Padding="7"/>
+
+                    <WrapPanel Margin="0,8,0,14">
+                        <Button Content="Импорт картинок"
+                                Command="{Binding ImportImagesCommand}"
+                                Margin="0,0,6,6"/>
+
+                        <Button Content="Открыть проект"
+                                Command="{Binding OpenProjectFolderCommand}"
+                                Margin="0,0,6,6"
+                                Background="#334155"/>
+                    </WrapPanel>
+
+                    <Separator/>
+
+                    <TextBlock Text="Обучение"
+                               FontWeight="SemiBold"
+                               Margin="0,12,0,5"/>
+
+                    <WrapPanel>
+                        <Button Content="▶ START LoRA"
+                                Command="{Binding StartTrainingCommand}"
+                                Padding="14,9"
+                                Margin="0,0,8,0"/>
+
+                        <Button Content="■ STOP"
+                                Command="{Binding StopTrainingCommand}"
+                                Padding="14,9"
+                                Background="#7F1D1D"/>
+                    </WrapPanel>
+
+                    <TextBlock Text="{Binding StatusText}"
+                               Margin="0,10,0,0"
+                               TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedTextBrush}"/>
+
+                </StackPanel>
+
+            </ScrollViewer>
+
+        </Border>
+
+        <Grid Grid.Column="2">
+
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="12"/>
+                <RowDefinition Height="220"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="14"
+                    Padding="12">
+
+                <Grid>
+
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="Dataset"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,8"/>
+
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding Items}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              HeadersVisibility="Column"
+                              CanUserAddRows="False">
+
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Image"
+                                                Binding="{Binding ImagePath}"
+                                                Width="2*"/>
+
+                            <DataGridTextColumn Header="Caption"
+                                                Binding="{Binding Caption}"
+                                                Width="3*"/>
+
+                            <DataGridTextColumn Header="Source"
+                                                Binding="{Binding Source}"
+                                                Width="100"/>
+                        </DataGrid.Columns>
+
+                    </DataGrid>
+
+                </Grid>
+
+            </Border>
+
+            <Border Grid.Row="2"
+                    Background="#0B1220"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="10">
+
+                <Grid>
+
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="Training log"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,6"/>
+
+                    <TextBox Grid.Row="1"
+                             Text="{Binding LogText}"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="NoWrap"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"
+                             FontSize="11"
+                             Background="#070D18"
+                             Foreground="#CBD5E1"/>
+
+                </Grid>
+
+            </Border>
+
+        </Grid>
+
+    </Grid>
+
+</UserControl>

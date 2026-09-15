@@ -1,0 +1,12 @@
+{
+  "name": "SD 1.5 · RTX 3080",
+  "family": "Sd15",
+  "resolution": 512,
+  "rank": 16,
+  "alpha": 16,
+  "epochs": 10,
+  "repeats": 10,
+  "learningRate": 0.0001,
+  "optimizer": "AdamW8bit",
+  "mixedPrecision": "fp16"
+}

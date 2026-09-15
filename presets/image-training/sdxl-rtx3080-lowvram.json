@@ -1,0 +1,12 @@
+{
+  "name": "SDXL · RTX 3080 · low VRAM",
+  "family": "Sdxl",
+  "resolution": 768,
+  "rank": 8,
+  "alpha": 8,
+  "epochs": 8,
+  "repeats": 8,
+  "learningRate": 8e-05,
+  "optimizer": "AdamW8bit",
+  "mixedPrecision": "fp16"
+}
