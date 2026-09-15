@@ -335,25 +335,46 @@ public sealed class ImageTrainingDatasetService
                 project.ProjectDirectory,
                 "dataset_config.toml");
 
+        var tomlBuilder =
+            new StringBuilder();
+
+        tomlBuilder.AppendLine("[general]");
+        tomlBuilder.AppendLine("shuffle_caption = false");
+        tomlBuilder.AppendLine("caption_extension = \".txt\"");
+        tomlBuilder.AppendLine("keep_tokens = 1");
+        tomlBuilder.AppendLine();
+        tomlBuilder.AppendLine("[[datasets]]");
+        tomlBuilder.AppendLine(
+            "resolution = " +
+            preset.Resolution.ToString(
+                CultureInfo.InvariantCulture));
+        tomlBuilder.AppendLine("batch_size = 1");
+        tomlBuilder.AppendLine("enable_bucket = true");
+        tomlBuilder.AppendLine("bucket_no_upscale = true");
+        tomlBuilder.AppendLine("min_bucket_reso = 256");
+        tomlBuilder.AppendLine(
+            "max_bucket_reso = " +
+            Math.Max(
+                1024,
+                preset.Resolution)
+            .ToString(
+                CultureInfo.InvariantCulture));
+        tomlBuilder.AppendLine();
+        tomlBuilder.AppendLine("  [[datasets.subsets]]");
+        tomlBuilder.AppendLine(
+            "  image_dir = \"" +
+            TomlPath(
+                imageDirectory) +
+            "\"");
+        tomlBuilder.AppendLine(
+            "  caption_extension = \".txt\"");
+        tomlBuilder.AppendLine(
+            "  num_repeats = " +
+            preset.Repeats.ToString(
+                CultureInfo.InvariantCulture));
+
         var toml =
-$"""[general]
-shuffle_caption = false
-caption_extension = ".txt"
-keep_tokens = 1
-
-[[datasets]]
-resolution = {preset.Resolution}
-batch_size = 1
-enable_bucket = true
-bucket_no_upscale = true
-min_bucket_reso = 256
-max_bucket_reso = {Math.Max(1024, preset.Resolution)}
-
-  [[datasets.subsets]]
-  image_dir = "{TomlPath(imageDirectory)}"
-  caption_extension = ".txt"
-  num_repeats = {preset.Repeats}
-""";
+            tomlBuilder.ToString();
 
         File.WriteAllText(
             path,

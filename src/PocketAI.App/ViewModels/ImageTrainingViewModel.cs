@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -36,10 +37,15 @@ public sealed class ImageTrainingViewModel :
     private string _heightText = "1024";
 
     private string _promptPlan =
-"""pocketstyle, clean technical illustration of a marine diesel engine, white background
-pocketstyle, engineering cutaway illustration of a ship propulsion system
-pocketstyle, precise technical drawing of a marine propulsion shaft line
-pocketstyle, educational engineering illustration, labeled components, clean composition""";
+        string.Join(
+            Environment.NewLine,
+            new[]
+            {
+                "pocketstyle, clean technical illustration of a marine diesel engine, white background",
+                "pocketstyle, engineering cutaway illustration of a ship propulsion system",
+                "pocketstyle, precise technical drawing of a marine propulsion shaft line",
+                "pocketstyle, educational engineering illustration, labeled components, clean composition"
+            });
 
     private ImageTrainingPreset? _selectedPreset;
     private int _promptIndex;
