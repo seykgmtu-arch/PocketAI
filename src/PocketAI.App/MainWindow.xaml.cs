@@ -1,34 +1,91 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
-using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using PocketAI.App.Services;
 using PocketAI.App.ViewModels;
 using PocketAI.App.Views;
 
 namespace PocketAI.App;
 
-public partial class MainWindow : Window
+public partial class MainWindow :
+    Window
 {
     private readonly MainViewModel _viewModel;
-    private ImageTrainingView? _trainingView;
-    private bool _trainingLoadFailed;
 
-    public MainWindow(MainViewModel viewModel)
+    private readonly Dictionary<
+        TabItem,
+        ModuleHostController> _moduleHosts;
+
+    public MainWindow(
+        MainViewModel viewModel)
     {
         InitializeComponent();
 
-        _viewModel = viewModel;
-        DataContext = viewModel;
+        _viewModel =
+            viewModel;
 
-        Loaded += OnLoaded;
-        Closing += OnClosing;
+        DataContext =
+            viewModel;
 
-        Dispatcher.UnhandledException += OnDispatcherUnhandledException;
-        _viewModel.Messages.CollectionChanged += OnMessagesChanged;
+        _moduleHosts =
+            new Dictionary<
+                TabItem,
+                ModuleHostController>
+            {
+                [TrainingTab] =
+                    new ModuleHostController(
+                        TrainingHost,
+                        "Image Training",
+                        "training-ui-error.log",
+                        () =>
+                            new ImageTrainingView(),
+                        view =>
+                            ((ImageTrainingView)view)
+                            .DisposeTraining()),
+
+                [TextTab] =
+                    new ModuleHostController(
+                        TextHost,
+                        "Text LoRA",
+                        "text-ui-error.log",
+                        () =>
+                            new TextLabView()),
+
+                [AudioTab] =
+                    new ModuleHostController(
+                        AudioHost,
+                        "Audio",
+                        "audio-ui-error.log",
+                        () =>
+                            new AudioLabView()),
+
+                [VideoTab] =
+                    new ModuleHostController(
+                        VideoHost,
+                        "Video",
+                        "video-ui-error.log",
+                        () =>
+                            new VideoLabView())
+            };
+
+        Loaded +=
+            OnLoaded;
+
+        Closing +=
+            OnClosing;
+
+        Dispatcher.UnhandledException +=
+            OnDispatcherUnhandledException;
+
+        _viewModel
+            .Messages
+            .CollectionChanged +=
+            OnMessagesChanged;
     }
 
     private async void OnLoaded(
@@ -44,15 +101,24 @@ public partial class MainWindow : Window
         object? sender,
         CancelEventArgs e)
     {
-        Dispatcher.UnhandledException -= OnDispatcherUnhandledException;
-        _viewModel.Messages.CollectionChanged -= OnMessagesChanged;
+        Dispatcher.UnhandledException -=
+            OnDispatcherUnhandledException;
 
-        try
+        _viewModel
+            .Messages
+            .CollectionChanged -=
+            OnMessagesChanged;
+
+        foreach (var controller in
+                 _moduleHosts.Values)
         {
-            _trainingView?.DisposeTraining();
-        }
-        catch
-        {
+            try
+            {
+                controller.Dispose();
+            }
+            catch
+            {
+            }
         }
 
         _viewModel.Dispose();
@@ -62,38 +128,25 @@ public partial class MainWindow : Window
         object sender,
         SelectionChangedEventArgs e)
     {
-        // SelectionChanged is a routed event and can also bubble from
-        // ComboBox/ListBox controls inside tab content. React only to
-        // an actual change of the main TabControl selection.
+        // SelectionChanged also bubbles from controls inside tabs.
         if (!ReferenceEquals(
                 e.OriginalSource,
-                MainTabs) ||
-            !TrainingTab.IsSelected)
+                MainTabs))
         {
             return;
         }
 
-        if (_trainingView is not null ||
-            _trainingLoadFailed)
+        if (MainTabs.SelectedItem is not
+            TabItem selectedTab)
         {
             return;
         }
 
-        try
+        if (_moduleHosts.TryGetValue(
+                selectedTab,
+                out var controller))
         {
-            var view =
-                new ImageTrainingView();
-
-            _trainingView =
-                view;
-
-            TrainingHost.Content =
-                view;
-        }
-        catch (Exception ex)
-        {
-            ShowTrainingError(
-                ex);
+            controller.EnsureLoaded();
         }
     }
 
@@ -101,160 +154,32 @@ public partial class MainWindow : Window
         object sender,
         DispatcherUnhandledExceptionEventArgs e)
     {
-        if (!TrainingTab.IsSelected)
+        if (MainTabs.SelectedItem is not
+            TabItem selectedTab)
+        {
+            return;
+        }
+
+        if (!_moduleHosts.TryGetValue(
+                selectedTab,
+                out var controller))
         {
             return;
         }
 
         try
         {
-            ShowTrainingError(
+            controller.Fail(
                 e.Exception);
 
-            e.Handled = true;
+            e.Handled =
+                true;
         }
-        catch
+        catch (Exception fallbackError)
         {
-            // If even the fallback UI cannot be built, let WPF handle the original error.
-        }
-    }
-
-    private void ShowTrainingError(
-        Exception exception)
-    {
-        _trainingLoadFailed = true;
-
-        try
-        {
-            _trainingView?.DisposeTraining();
-        }
-        catch
-        {
-        }
-
-        _trainingView = null;
-
-        var root =
-            exception.GetBaseException();
-
-        var message =
-            root.GetType().FullName +
-            Environment.NewLine +
-            root.Message;
-
-        TryWriteTrainingErrorLog(
-            exception);
-
-        TrainingHost.Content =
-            new Border
-            {
-                Background =
-                    new System.Windows.Media.SolidColorBrush(
-                        System.Windows.Media.Color.FromRgb(
-                            58,
-                            29,
-                            29)),
-                BorderBrush =
-                    new System.Windows.Media.SolidColorBrush(
-                        System.Windows.Media.Color.FromRgb(
-                            127,
-                            29,
-                            29)),
-                BorderThickness =
-                    new Thickness(1),
-                CornerRadius =
-                    new CornerRadius(10),
-                Padding =
-                    new Thickness(14),
-                Child =
-                    new StackPanel
-                    {
-                        Children =
-                        {
-                            new TextBlock
-                            {
-                                Text =
-                                    "Training UI не удалось открыть. PocketAI продолжает работать.",
-                                FontWeight =
-                                    FontWeights.SemiBold,
-                                Foreground =
-                                    new System.Windows.Media.SolidColorBrush(
-                                        System.Windows.Media.Color.FromRgb(
-                                            254,
-                                            202,
-                                            202)),
-                                TextWrapping =
-                                    TextWrapping.Wrap
-                            },
-                            new TextBlock
-                            {
-                                Text =
-                                    message,
-                                Margin =
-                                    new Thickness(
-                                        0,
-                                        10,
-                                        0,
-                                        0),
-                                Foreground =
-                                    new System.Windows.Media.SolidColorBrush(
-                                        System.Windows.Media.Color.FromRgb(
-                                            254,
-                                            226,
-                                            226)),
-                                TextWrapping =
-                                    TextWrapping.Wrap
-                            },
-                            new TextBlock
-                            {
-                                Text =
-                                    "Подробности: logs\\training-ui-error.log",
-                                Margin =
-                                    new Thickness(
-                                        0,
-                                        10,
-                                        0,
-                                        0),
-                                Foreground =
-                                    new System.Windows.Media.SolidColorBrush(
-                                        System.Windows.Media.Color.FromRgb(
-                                            148,
-                                            163,
-                                            184))
-                            }
-                        }
-                    }
-            };
-    }
-
-    private static void TryWriteTrainingErrorLog(
-        Exception exception)
-    {
-        try
-        {
-            var directory =
-                Path.Combine(
-                    AppContext.BaseDirectory,
-                    "logs");
-
-            Directory.CreateDirectory(
-                directory);
-
-            var path =
-                Path.Combine(
-                    directory,
-                    "training-ui-error.log");
-
-            File.AppendAllText(
-                path,
-                $"[{DateTime.Now:O}]{Environment.NewLine}" +
-                exception +
-                Environment.NewLine +
-                new string('-', 72) +
-                Environment.NewLine);
-        }
-        catch
-        {
+            ModuleErrorService.WriteException(
+                "module-guard-fallback-error.log",
+                fallbackError);
         }
     }
 
@@ -262,15 +187,18 @@ public partial class MainWindow : Window
         object? sender,
         NotifyCollectionChangedEventArgs e)
     {
-        Dispatcher.BeginInvoke(() =>
-        {
-            if (ChatList.Items.Count > 0)
+        Dispatcher.BeginInvoke(
+            () =>
             {
-                ChatList.ScrollIntoView(
-                    ChatList.Items[
-                        ChatList.Items.Count - 1]);
-            }
-        });
+                if (ChatList.Items.Count >
+                    0)
+                {
+                    ChatList.ScrollIntoView(
+                        ChatList.Items[
+                            ChatList.Items.Count -
+                            1]);
+                }
+            });
     }
 
     private void PromptBox_OnPreviewKeyDown(
@@ -284,11 +212,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_viewModel.SendCommand.CanExecute(null))
+        if (_viewModel
+            .SendCommand
+            .CanExecute(
+                null))
         {
-            e.Handled = true;
+            e.Handled =
+                true;
 
-            _viewModel.SendCommand.Execute(null);
+            _viewModel
+                .SendCommand
+                .Execute(
+                    null);
         }
     }
 }

@@ -1,0 +1,36 @@
+<UserControl x:Class="PocketAI.App.Views.AudioLabView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent">
+    <Grid Margin="8">
+        <Border Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="14"
+                Padding="18">
+            <StackPanel>
+                <TextBlock Text="🎵 Audio"
+                           FontSize="24"
+                           FontWeight="Bold"/>
+                <TextBlock Text="Music / SFX / Speech. Local generators only, no cloud quota."
+                           Margin="0,8,0,14"
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}"/>
+                <Border Background="#0E1728"
+                        CornerRadius="9"
+                        Padding="12">
+                    <StackPanel>
+                        <TextBlock Text="Safe module shell: READY"
+                                   FontWeight="SemiBold"
+                                   Foreground="#C9FBE6"/>
+                        <TextBlock Text="Тяжёлые Python/CUDA процессы будут запускаться отдельно от PocketAI.exe. stdout/stderr пишутся в logs, а ошибка показывается здесь без закрытия главного окна."
+                                   Margin="0,6,0,0"
+                                   TextWrapping="Wrap"
+                                   FontSize="12"
+                                   Foreground="{StaticResource MutedTextBrush}"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
