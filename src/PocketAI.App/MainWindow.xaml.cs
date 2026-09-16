@@ -32,6 +32,41 @@ public partial class MainWindow :
         DataContext =
             viewModel;
 
+        // Create Text / Audio / Video in code.
+        // MainWindow.xaml can stay unchanged.
+        var (textTab, textHost) =
+            CreateLazyModuleTab(
+                "📝 Text LoRA",
+                "Text LoRA будет загружен при выборе вкладки.");
+
+        var (audioTab, audioHost) =
+            CreateLazyModuleTab(
+                "🎵 Audio",
+                "Audio будет загружен при выборе вкладки.");
+
+        var (videoTab, videoHost) =
+            CreateLazyModuleTab(
+                "🎬 Video",
+                "Video будет загружен при выборе вкладки.");
+
+        // Keep Perchance as the last tab.
+        var insertIndex =
+            Math.Max(
+                0,
+                MainTabs.Items.Count - 1);
+
+        MainTabs.Items.Insert(
+            insertIndex++,
+            textTab);
+
+        MainTabs.Items.Insert(
+            insertIndex++,
+            audioTab);
+
+        MainTabs.Items.Insert(
+            insertIndex,
+            videoTab);
+
         _moduleHosts =
             new Dictionary<
                 TabItem,
@@ -48,25 +83,25 @@ public partial class MainWindow :
                             ((ImageTrainingView)view)
                             .DisposeTraining()),
 
-                [TextTab] =
+                [textTab] =
                     new ModuleHostController(
-                        TextHost,
+                        textHost,
                         "Text LoRA",
                         "text-ui-error.log",
                         () =>
                             new TextLabView()),
 
-                [AudioTab] =
+                [audioTab] =
                     new ModuleHostController(
-                        AudioHost,
+                        audioHost,
                         "Audio",
                         "audio-ui-error.log",
                         () =>
                             new AudioLabView()),
 
-                [VideoTab] =
+                [videoTab] =
                     new ModuleHostController(
-                        VideoHost,
+                        videoHost,
                         "Video",
                         "video-ui-error.log",
                         () =>
@@ -86,6 +121,42 @@ public partial class MainWindow :
             .Messages
             .CollectionChanged +=
             OnMessagesChanged;
+    }
+
+    private static (
+        TabItem Tab,
+        ContentControl Host)
+        CreateLazyModuleTab(
+            string header,
+            string placeholder)
+    {
+        var host =
+            new ContentControl
+            {
+                Content =
+                    new TextBlock
+                    {
+                        Text =
+                            placeholder,
+                        Margin =
+                            new Thickness(12),
+                        TextWrapping =
+                            TextWrapping.Wrap
+                    }
+            };
+
+        var tab =
+            new TabItem
+            {
+                Header =
+                    header,
+                Content =
+                    host
+            };
+
+        return (
+            tab,
+            host);
     }
 
     private async void OnLoaded(
