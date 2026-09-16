@@ -39,6 +39,11 @@ public partial class MainWindow :
                 "🛠 Control Center",
                 "Control Center будет загружен при выборе вкладки.");
 
+        var (localAgentTab, localAgentHost) =
+            CreateLazyModuleTab(
+                "🤖 Local Agent",
+                "Local Agent / Workflows будет загружен при выборе вкладки.");
+
         var (textTab, textHost) =
             CreateLazyModuleTab(
                 "📝 Text LoRA",
@@ -63,6 +68,10 @@ public partial class MainWindow :
         MainTabs.Items.Insert(
             insertIndex++,
             controlCenterTab);
+
+        MainTabs.Items.Insert(
+            insertIndex++,
+            localAgentTab);
 
         MainTabs.Items.Insert(
             insertIndex++,
@@ -99,6 +108,14 @@ public partial class MainWindow :
                         "control-center-ui-error.log",
                         () =>
                             new ControlCenterView()),
+
+                [localAgentTab] =
+                    new ModuleHostController(
+                        localAgentHost,
+                        "Local Agent",
+                        "local-agent-ui-error.log",
+                        () =>
+                            new LocalAgentView()),
 
                 [textTab] =
                     new ModuleHostController(
