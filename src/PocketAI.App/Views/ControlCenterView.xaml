@@ -19,18 +19,18 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel>
-                <TextBlock Text="🛠 Control Center"
+                <TextBlock Text="🛠 Control Center v1.1"
                            FontSize="24"
                            FontWeight="Bold"/>
 
-                <TextBlock Text="Состояние модулей, version-lock, runtime, модели, снимки и безопасная диагностика."
+                <TextBlock Text="Реальный CPU/CUDA backend · version-lock · runtime · модели · диск · snapshots."
                            Margin="0,5,0,0"
                            TextWrapping="Wrap"
                            Foreground="{StaticResource MutedTextBrush}"/>
             </StackPanel>
 
             <Button Grid.Column="1"
-                    Content="Обновить"
+                    Content="Обновить всё"
                     Click="Refresh_OnClick"
                     Padding="14,7"
                     VerticalAlignment="Center"/>
@@ -113,23 +113,36 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Модуль"
                                         Binding="{Binding Module}"
-                                        Width="130"/>
+                                        Width="115"/>
 
                     <DataGridTextColumn Header="Состояние"
                                         Binding="{Binding State}"
                                         Width="145"/>
 
-                    <DataGridTextColumn Header="Runtime"
+                    <DataGridTextColumn Header="Runtime / backend"
                                         Binding="{Binding Runtime}"
-                                        Width="200"/>
+                                        Width="205"/>
 
                     <DataGridTextColumn Header="Модель"
                                         Binding="{Binding Model}"
-                                        Width="200"/>
+                                        Width="170"/>
 
                     <DataGridTextColumn Header="Подробности"
                                         Binding="{Binding Details}"
                                         Width="*"/>
+
+                    <DataGridTemplateColumn Header="Проверка"
+                                            Width="95">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Content="Проверить"
+                                        Tag="{Binding Module}"
+                                        Click="CheckModule_OnClick"
+                                        Padding="7,3"
+                                        Margin="3"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>

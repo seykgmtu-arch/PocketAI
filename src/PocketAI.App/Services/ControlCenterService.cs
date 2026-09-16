@@ -1,7 +1,13 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace PocketAI.App.Services;
 
@@ -20,14 +26,24 @@ public sealed class ControlCenterScanResult
     public string HardwareSummary { get; init; } = "";
     public string DiskSummary { get; init; } = "";
     public string VersionLockSummary { get; init; } = "";
+    public double FreeDiskGb { get; init; }
+    public bool HasNvidiaGpu { get; init; }
+
     public IReadOnlyList<ControlCenterModuleStatus> Modules { get; init; } =
         Array.Empty<ControlCenterModuleStatus>();
+
     public DateTimeOffset CreatedAt { get; init; } =
         DateTimeOffset.Now;
 }
 
 public sealed class ControlCenterService
 {
+    private sealed class NvidiaProbeResult
+    {
+        public bool Available { get; init; }
+        public string Summary { get; init; } = "GPU: NVIDIA не обнаружена";
+    }
+
     private static readonly JsonSerializerOptions JsonOptions =
         new()
         {
@@ -47,13 +63,19 @@ public sealed class ControlCenterService
     public async Task<ControlCenterScanResult> ScanAsync(
         CancellationToken cancellationToken = default)
     {
-        var fileScan =
-            await Task.Run(
-                () => ScanFiles(cancellationToken),
+        var nvidia =
+            await ProbeNvidiaAsync(
                 cancellationToken);
 
-        var gpu =
-            await ProbeNvidiaAsync(
+        var freeDiskGb =
+            GetAvailableDiskGb();
+
+        var fileScan =
+            await Task.Run(
+                () => ScanFiles(
+                    nvidia.Available,
+                    freeDiskGb,
+                    cancellationToken),
                 cancellationToken);
 
         return new ControlCenterScanResult
@@ -64,13 +86,20 @@ public sealed class ControlCenterService
             HardwareSummary =
                 $"OS: {Environment.OSVersion.VersionString} · " +
                 $"CPU threads: {Environment.ProcessorCount} · " +
-                gpu,
+                nvidia.Summary,
 
             DiskSummary =
-                BuildDiskSummary(),
+                BuildDiskSummary(
+                    freeDiskGb),
 
             VersionLockSummary =
                 fileScan.VersionLockSummary,
+
+            FreeDiskGb =
+                freeDiskGb,
+
+            HasNvidiaGpu =
+                nvidia.Available,
 
             Modules =
                 fileScan.Modules,
@@ -78,6 +107,33 @@ public sealed class ControlCenterService
             CreatedAt =
                 DateTimeOffset.Now
         };
+    }
+
+    public async Task<ControlCenterModuleStatus> CheckModuleAsync(
+        string module,
+        CancellationToken cancellationToken = default)
+    {
+        var scan =
+            await ScanAsync(
+                cancellationToken);
+
+        var status =
+            scan.Modules.FirstOrDefault(
+                item =>
+                    string.Equals(
+                        item.Module,
+                        module,
+                        StringComparison.OrdinalIgnoreCase));
+
+        return status ??
+               new ControlCenterModuleStatus
+               {
+                   Module = module,
+                   State = "🔴 Error",
+                   Runtime = "—",
+                   Model = "—",
+                   Details = "Модуль не найден Control Center."
+               };
     }
 
     public async Task<string> CreateConfigurationSnapshotAsync(
@@ -141,14 +197,11 @@ public sealed class ControlCenterService
         CopyRuntimeMetadata(
             snapshotDirectory);
 
-        var manifest =
-            BuildManifest();
-
         await File.WriteAllTextAsync(
             Path.Combine(
                 snapshotDirectory,
                 "file-manifest.txt"),
-            manifest,
+            BuildManifest(),
             cancellationToken);
 
         return snapshotDirectory;
@@ -298,43 +351,37 @@ public sealed class ControlCenterService
             : 0;
     }
 
-    public void OpenLogsFolder()
-    {
+    public void OpenLogsFolder() =>
         OpenFolder(
             Path.Combine(
                 _root,
                 "logs"));
-    }
 
-    public void OpenSnapshotsFolder()
-    {
+    public void OpenSnapshotsFolder() =>
         OpenFolder(
             Path.Combine(
                 _root,
                 "snapshots"));
-    }
 
-    public void OpenVersionLockFolder()
-    {
+    public void OpenVersionLockFolder() =>
         OpenFolder(
             Path.Combine(
                 _root,
                 "dev",
                 "version-lock"));
-    }
 
-    public void OpenDiagnosticsFolder()
-    {
+    public void OpenDiagnosticsFolder() =>
         OpenFolder(
             Path.Combine(
                 _root,
                 "diagnostics"));
-    }
 
     private (
         IReadOnlyList<ControlCenterModuleStatus> Modules,
         string VersionLockSummary)
         ScanFiles(
+            bool hasNvidiaGpu,
+            double freeDiskGb,
             CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -364,26 +411,49 @@ public sealed class ControlCenterService
                 "*.gguf",
                 SearchOption.AllDirectories);
 
+        var runningLlama =
+            TryGetRunningExecutablePath(
+                "llama-server");
+
+        var chatRuntime =
+            ResolveBackendText(
+                runningLlama,
+                hasNvidiaGpu,
+                llamaCpu,
+                llamaCuda,
+                "llama.cpp");
+
+        var chatRunnable =
+            IsRunnableBackend(
+                hasNvidiaGpu,
+                llamaCpu,
+                llamaCuda);
+
         modules.Add(
-            BuildStatus(
-                "Chat",
-                runtimeReady:
-                    llamaCpu ||
-                    llamaCuda,
-                modelReady:
-                    chatModels > 0,
-                runtime:
-                    llamaCuda
-                        ? "llama.cpp CUDA"
-                        : llamaCpu
-                            ? "llama.cpp CPU"
-                            : "не найден",
-                model:
+            new ControlCenterModuleStatus
+            {
+                Module =
+                    "Chat",
+
+                State =
+                    BuildCoreState(
+                        chatRunnable,
+                        chatModels > 0),
+
+                Runtime =
+                    chatRuntime,
+
+                Model =
                     chatModels > 0
                         ? $"{chatModels} GGUF"
                         : "GGUF не найден",
-                details:
-                    "runtime\\llama + models\\chat"));
+
+                Details =
+                    BuildBackendDetails(
+                        hasNvidiaGpu,
+                        llamaCpu,
+                        llamaCuda)
+            });
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -415,7 +485,7 @@ public sealed class ControlCenterService
                         ? "✅ Ready"
                         : lexicalIndex
                             ? "🟡 Partial"
-                            : "⚪ Not ready",
+                            : "🔴 Needs setup",
 
                 Runtime =
                     embeddingModel
@@ -456,26 +526,49 @@ public sealed class ControlCenterService
                 "*.safetensors",
                 SearchOption.AllDirectories);
 
+        var runningSd =
+            TryGetRunningExecutablePath(
+                "sd-server");
+
+        var imageRuntime =
+            ResolveBackendText(
+                runningSd,
+                hasNvidiaGpu,
+                sdCpu,
+                sdCuda,
+                "stable-diffusion.cpp");
+
+        var imageRunnable =
+            IsRunnableBackend(
+                hasNvidiaGpu,
+                sdCpu,
+                sdCuda);
+
         modules.Add(
-            BuildStatus(
-                "Image",
-                runtimeReady:
-                    sdCpu ||
-                    sdCuda,
-                modelReady:
-                    imageModels > 0,
-                runtime:
-                    sdCuda
-                        ? "stable-diffusion.cpp CUDA"
-                        : sdCpu
-                            ? "stable-diffusion.cpp CPU"
-                            : "не найден",
-                model:
+            new ControlCenterModuleStatus
+            {
+                Module =
+                    "Image",
+
+                State =
+                    BuildCoreState(
+                        imageRunnable,
+                        imageModels > 0),
+
+                Runtime =
+                    imageRuntime,
+
+                Model =
                     imageModels > 0
                         ? $"{imageModels} safetensors"
                         : "модели не найдены",
-                details:
-                    "LOCAL image generation"));
+
+                Details =
+                    BuildBackendDetails(
+                        hasNvidiaGpu,
+                        sdCpu,
+                        sdCuda)
+            });
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -513,7 +606,7 @@ public sealed class ControlCenterService
                 State =
                     imageTraining
                         ? "✅ Ready"
-                        : "⚪ Not installed",
+                        : "🔴 Not installed",
 
                 Runtime =
                     imageTraining
@@ -560,7 +653,11 @@ public sealed class ControlCenterService
                         "text"
                     },
                 modelPattern:
-                    "config.json"));
+                    "config.json",
+                freeDiskGb:
+                    freeDiskGb,
+                recommendedFreeGb:
+                    8));
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -594,7 +691,11 @@ public sealed class ControlCenterService
                         "audio"
                     },
                 modelPattern:
-                    "*"));
+                    "*",
+                freeDiskGb:
+                    freeDiskGb,
+                recommendedFreeGb:
+                    10));
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -628,14 +729,15 @@ public sealed class ControlCenterService
                         "video"
                     },
                 modelPattern:
-                    "config.json"));
-
-        var versionLock =
-            ReadVersionLockSummary();
+                    "config.json",
+                freeDiskGb:
+                    freeDiskGb,
+                recommendedFreeGb:
+                    30));
 
         return (
             modules,
-            versionLock);
+            ReadVersionLockSummary());
     }
 
     private ControlCenterModuleStatus ScanFutureModule(
@@ -644,7 +746,9 @@ public sealed class ControlCenterService
         string compatMarker,
         string[] gpuVenvRelative,
         string[] modelDirectoryRelative,
-        string modelPattern)
+        string modelPattern,
+        double freeDiskGb,
+        double recommendedFreeGb)
     {
         var compat =
             FileContains(
@@ -688,15 +792,28 @@ public sealed class ControlCenterService
                     modelPattern,
                     SearchOption.AllDirectories);
 
+        var diskOk =
+            freeDiskGb >=
+            recommendedFreeGb;
+
         var state =
             gpuRuntime &&
             modelCount > 0
                 ? "✅ Ready"
-                : compat
-                    ? "🟡 CPU verified"
-                    : gpuRuntime
-                        ? "🟡 Runtime only"
-                        : "⚪ Not installed";
+                : compat &&
+                  !diskOk
+                    ? "🔴 Disk low"
+                    : compat
+                        ? "🟡 CPU verified"
+                        : gpuRuntime
+                            ? "🟡 Runtime only"
+                            : "🔴 Not installed";
+
+        var diskText =
+            diskOk
+                ? $"disk OK ({freeDiskGb:0.0} GB free)"
+                : $"⚠ рекомендуется ≥{recommendedFreeGb:0} GB free; " +
+                  $"доступно {freeDiskGb:0.0} GB";
 
         return new ControlCenterModuleStatus
         {
@@ -719,43 +836,158 @@ public sealed class ControlCenterService
                     : "модель не установлена",
 
             Details =
-                compat
+                (compat
                     ? "version-lock verified"
-                    : "compatibility check не найден"
+                    : "compatibility check не найден") +
+                " · " +
+                diskText
         };
     }
 
-    private ControlCenterModuleStatus BuildStatus(
-        string module,
-        bool runtimeReady,
-        bool modelReady,
-        string runtime,
-        string model,
-        string details)
+    private static string BuildCoreState(
+        bool runtimeRunnable,
+        bool modelReady)
     {
-        return new ControlCenterModuleStatus
+        if (runtimeRunnable &&
+            modelReady)
         {
-            Module =
-                module,
+            return "✅ Ready";
+        }
 
-            State =
-                runtimeReady &&
-                modelReady
-                    ? "✅ Ready"
-                    : runtimeReady ||
-                      modelReady
-                        ? "🟡 Partial"
-                        : "⚪ Not installed",
+        if (runtimeRunnable ||
+            modelReady)
+        {
+            return "🟡 Partial";
+        }
 
-            Runtime =
-                runtime,
+        return "🔴 Not runnable";
+    }
 
-            Model =
-                model,
+    private static bool IsRunnableBackend(
+        bool hasNvidiaGpu,
+        bool cpuFiles,
+        bool cudaFiles)
+    {
+        return cpuFiles ||
+               (hasNvidiaGpu &&
+                cudaFiles);
+    }
 
-            Details =
-                details
-        };
+    private static string ResolveBackendText(
+        string? runningExecutable,
+        bool hasNvidiaGpu,
+        bool cpuFiles,
+        bool cudaFiles,
+        string engine)
+    {
+        if (!string.IsNullOrWhiteSpace(
+                runningExecutable))
+        {
+            if (ContainsPathSegment(
+                    runningExecutable,
+                    "cuda"))
+            {
+                return
+                    $"{engine} CUDA · running";
+            }
+
+            if (ContainsPathSegment(
+                    runningExecutable,
+                    "cpu"))
+            {
+                return
+                    $"{engine} CPU · running";
+            }
+
+            return
+                $"{engine} · running";
+        }
+
+        if (hasNvidiaGpu &&
+            cudaFiles)
+        {
+            return
+                $"{engine} CUDA · available";
+        }
+
+        if (cpuFiles)
+        {
+            return
+                $"{engine} CPU · available";
+        }
+
+        if (cudaFiles &&
+            !hasNvidiaGpu)
+        {
+            return
+                $"{engine} CUDA files present · GPU unavailable";
+        }
+
+        return
+            "runtime не найден";
+    }
+
+    private static string BuildBackendDetails(
+        bool hasNvidiaGpu,
+        bool cpuFiles,
+        bool cudaFiles)
+    {
+        return
+            $"GPU={(hasNvidiaGpu ? "NVIDIA available" : "unavailable")} · " +
+            $"CPU files={(cpuFiles ? "yes" : "no")} · " +
+            $"CUDA files={(cudaFiles ? "yes" : "no")}";
+    }
+
+    private static bool ContainsPathSegment(
+        string path,
+        string segment)
+    {
+        var normalized =
+            path.Replace(
+                '/',
+                '\\');
+
+        return normalized.Contains(
+            "\\" +
+            segment +
+            "\\",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryGetRunningExecutablePath(
+        string processName)
+    {
+        try
+        {
+            foreach (var process in
+                     Process.GetProcessesByName(
+                         processName))
+            {
+                using (process)
+                {
+                    try
+                    {
+                        var fileName =
+                            process.MainModule?
+                                .FileName;
+
+                        if (!string.IsNullOrWhiteSpace(
+                                fileName))
+                        {
+                            return fileName;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
     }
 
     private string ReadVersionLockSummary()
@@ -768,6 +1000,17 @@ public sealed class ControlCenterService
                     "version-lock",
                     "VERSION-MATRIX-v2.json"),
 
+                Path.Combine(
+                    AppContext.BaseDirectory,
+                    "dev",
+                    "version-lock",
+                    "VERSION-MATRIX-v2.json"),
+
+                Path.Combine(
+                    AppContext.BaseDirectory,
+                    "ControlCenter",
+                    "VERSION-MATRIX-v2.json"),
+
                 PathOf(
                     "dev",
                     "version-lock",
@@ -776,12 +1019,7 @@ public sealed class ControlCenterService
                 PathOf(
                     "dev",
                     "version-lock",
-                    "VERSION-MATRIX-v2.txt"),
-
-                PathOf(
-                    "dev",
-                    "version-lock",
-                    "VERSION-MATRIX.txt")
+                    "VERSION-MATRIX-v2.txt")
             };
 
         var file =
@@ -792,7 +1030,7 @@ public sealed class ControlCenterService
         if (file is null)
         {
             return
-                "Version lock: не найден";
+                "🔴 Version lock: не найден";
         }
 
         try
@@ -826,17 +1064,17 @@ public sealed class ControlCenterService
                         : "loaded";
 
                 return
-                    $"Version lock: {Path.GetFileName(file)} · " +
+                    $"✅ Version lock: {Path.GetFileName(file)} · " +
                     $"Python {python ?? "?"} · {status}";
             }
 
             return
-                $"Version lock: {Path.GetFileName(file)}";
+                $"✅ Version lock: {Path.GetFileName(file)}";
         }
         catch (Exception ex)
         {
             return
-                "Version lock: ошибка чтения · " +
+                "🔴 Version lock: ошибка чтения · " +
                 ex.Message;
         }
     }
@@ -863,7 +1101,35 @@ public sealed class ControlCenterService
         return childNode.ToString();
     }
 
-    private string BuildDiskSummary()
+    private double GetAvailableDiskGb()
+    {
+        try
+        {
+            var rootPath =
+                Path.GetPathRoot(
+                    _root);
+
+            if (string.IsNullOrWhiteSpace(
+                    rootPath))
+            {
+                return 0;
+            }
+
+            var drive =
+                new DriveInfo(
+                    rootPath);
+
+            return ToGb(
+                drive.AvailableFreeSpace);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private string BuildDiskSummary(
+        double freeDiskGb)
     {
         try
         {
@@ -881,10 +1147,17 @@ public sealed class ControlCenterService
                 new DriveInfo(
                     rootPath);
 
+            var warning =
+                freeDiskGb <
+                30
+                    ? " · ⚠ Video рекомендуется ≥30 GB free"
+                    : "";
+
             return
                 $"Disk {drive.Name}: " +
-                $"{ToGb(drive.AvailableFreeSpace):0.0} GB free / " +
-                $"{ToGb(drive.TotalSize):0.0} GB";
+                $"{freeDiskGb:0.0} GB free / " +
+                $"{ToGb(drive.TotalSize):0.0} GB" +
+                warning;
         }
         catch
         {
@@ -892,7 +1165,7 @@ public sealed class ControlCenterService
         }
     }
 
-    private async Task<string> ProbeNvidiaAsync(
+    private async Task<NvidiaProbeResult> ProbeNvidiaAsync(
         CancellationToken cancellationToken)
     {
         try
@@ -910,7 +1183,7 @@ public sealed class ControlCenterService
                     result.Output))
             {
                 return
-                    "GPU: NVIDIA не обнаружена";
+                    new NvidiaProbeResult();
             }
 
             var line =
@@ -924,17 +1197,27 @@ public sealed class ControlCenterService
                         StringSplitOptions.RemoveEmptyEntries)
                     .FirstOrDefault();
 
-            return
-                string.IsNullOrWhiteSpace(
-                    line)
-                    ? "GPU: NVIDIA не обнаружена"
-                    : "GPU: " +
-                      line.Trim();
+            if (string.IsNullOrWhiteSpace(
+                    line))
+            {
+                return
+                    new NvidiaProbeResult();
+            }
+
+            return new NvidiaProbeResult
+            {
+                Available =
+                    true,
+
+                Summary =
+                    "GPU: " +
+                    line.Trim()
+            };
         }
         catch
         {
             return
-                "GPU: NVIDIA не обнаружена";
+                new NvidiaProbeResult();
         }
     }
 
@@ -1186,7 +1469,7 @@ public sealed class ControlCenterService
         }
     }
 
-    private void CopyDirectoryFiles(
+    private static void CopyDirectoryFiles(
         string source,
         string destination)
     {
@@ -1287,7 +1570,7 @@ public sealed class ControlCenterService
             return;
         }
 
-        IEnumerable<string> files;
+        string[] files;
 
         try
         {

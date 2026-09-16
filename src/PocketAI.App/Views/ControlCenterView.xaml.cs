@@ -1,6 +1,11 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using PocketAI.App.Services;
@@ -46,64 +51,48 @@ public partial class ControlCenterView :
             OnLoaded;
     }
 
-    public ObservableCollection<
-        ControlCenterModuleStatus>
+    public ObservableCollection<ControlCenterModuleStatus>
         Modules { get; } =
             new();
 
     public string HardwareText
     {
-        get =>
-            _hardwareText;
-
-        private set =>
-            SetField(
-                ref _hardwareText,
-                value);
+        get => _hardwareText;
+        private set => SetField(
+            ref _hardwareText,
+            value);
     }
 
     public string DiskText
     {
-        get =>
-            _diskText;
-
-        private set =>
-            SetField(
-                ref _diskText,
-                value);
+        get => _diskText;
+        private set => SetField(
+            ref _diskText,
+            value);
     }
 
     public string RootText
     {
-        get =>
-            _rootText;
-
-        private set =>
-            SetField(
-                ref _rootText,
-                value);
+        get => _rootText;
+        private set => SetField(
+            ref _rootText,
+            value);
     }
 
     public string VersionLockText
     {
-        get =>
-            _versionLockText;
-
-        private set =>
-            SetField(
-                ref _versionLockText,
-                value);
+        get => _versionLockText;
+        private set => SetField(
+            ref _versionLockText,
+            value);
     }
 
     public string LastActionText
     {
-        get =>
-            _lastActionText;
-
-        private set =>
-            SetField(
-                ref _lastActionText,
-                value);
+        get => _lastActionText;
+        private set => SetField(
+            ref _lastActionText,
+            value);
     }
 
     public Visibility BusyVisibility =>
@@ -129,6 +118,60 @@ public partial class ControlCenterView :
         RoutedEventArgs e)
     {
         await RefreshSafeAsync();
+    }
+
+    private async void CheckModule_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is not Button button ||
+            button.Tag is not string module ||
+            string.IsNullOrWhiteSpace(module))
+        {
+            return;
+        }
+
+        await ExecuteSafeAsync(
+            async () =>
+            {
+                LastActionText =
+                    $"Проверяем {module}…";
+
+                var status =
+                    await _service.CheckModuleAsync(
+                        module);
+
+                var index =
+                    Modules
+                        .Select(
+                            (item, i) =>
+                                new
+                                {
+                                    item,
+                                    i
+                                })
+                        .FirstOrDefault(
+                            pair =>
+                                string.Equals(
+                                    pair.item.Module,
+                                    module,
+                                    StringComparison.OrdinalIgnoreCase))
+                        ?.i;
+
+                if (index.HasValue)
+                {
+                    Modules[index.Value] =
+                        status;
+                }
+                else
+                {
+                    Modules.Add(
+                        status);
+                }
+
+                LastActionText =
+                    $"{module}: {status.State} · {status.Runtime}";
+            });
     }
 
     private async Task RefreshSafeAsync()
@@ -273,45 +316,36 @@ public partial class ControlCenterView :
 
                 LastActionText =
                     $"Остановлено AI workers: {count}";
-
-                await RefreshSafeAsync();
             });
+
+        await RefreshSafeAsync();
     }
 
     private void OpenLogs_OnClick(
         object sender,
-        RoutedEventArgs e)
-    {
+        RoutedEventArgs e) =>
         ExecuteSafe(
             _service.OpenLogsFolder);
-    }
 
     private void OpenSnapshots_OnClick(
         object sender,
-        RoutedEventArgs e)
-    {
+        RoutedEventArgs e) =>
         ExecuteSafe(
             _service.OpenSnapshotsFolder);
-    }
 
     private void OpenVersionLock_OnClick(
         object sender,
-        RoutedEventArgs e)
-    {
+        RoutedEventArgs e) =>
         ExecuteSafe(
             _service.OpenVersionLockFolder);
-    }
 
     private void OpenDiagnostics_OnClick(
         object sender,
-        RoutedEventArgs e)
-    {
+        RoutedEventArgs e) =>
         ExecuteSafe(
             _service.OpenDiagnosticsFolder);
-    }
 
-    private async Task<
-        ControlCenterScanResult>
+    private async Task<ControlCenterScanResult>
         EnsureScanAsync()
     {
         if (_lastScan is not null)
