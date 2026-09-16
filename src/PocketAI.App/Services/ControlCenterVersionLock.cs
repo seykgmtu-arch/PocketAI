@@ -1,0 +1,115 @@
+using System;
+using System.IO;
+using System.Text;
+
+namespace PocketAI.App.Services;
+
+internal static class ControlCenterVersionLock
+{
+    private const string BuiltInJson = """
+{
+  "status": "CPU compatibility validated",
+  "validated": {
+    "text": true,
+    "audio": true,
+    "video": true
+  },
+  "baseline": {
+    "python": "3.10.11",
+    "pip": "26.2.1",
+    "architecture": "x64"
+  },
+  "text": {
+    "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "torch": "2.6.0+cu124",
+    "transformers": "4.57.6",
+    "peft": "0.21.0",
+    "accelerate": "1.15.0",
+    "huggingface_hub": "0.36.2",
+    "safetensors": "0.8.0",
+    "sentencepiece": "0.2.2",
+    "tokenizers": "0.22.2",
+    "cpu_compat": "OK"
+  },
+  "audio": {
+    "engine": "Stability-AI/stable-audio-3",
+    "first_model": "stabilityai/stable-audio-3-small-music",
+    "torch": "2.7.1+cu126",
+    "torchaudio": "2.7.1+cu126",
+    "transformers": "5.17.0",
+    "cpu_compat": "OK"
+  },
+  "video": {
+    "engine": "Wan-Video/Wan2.1",
+    "model": "Wan-AI/Wan2.1-T2V-1.3B",
+    "torch": "2.6.0+cu124",
+    "torchvision": "0.21.0+cu124",
+    "transformers": "4.57.6",
+    "tokenizers": "0.22.2",
+    "accelerate": "1.15.0",
+    "diffusers": "0.38.0",
+    "huggingface_hub": "0.36.2",
+    "safetensors": "0.8.0",
+    "numpy": "1.26.4",
+    "flash_attn": "omit-on-first-windows-pass",
+    "cpu_compat": "OK"
+  },
+  "disk_recommendations_gb": {
+    "text": 8,
+    "audio": 10,
+    "video": 30
+  },
+  "next_stage": "GPU install/verify on RTX 3080"
+}
+""";
+
+    public static bool EnsureMaterialized(
+        string pocketAiRoot)
+    {
+        var target =
+            Path.Combine(
+                pocketAiRoot,
+                "dev",
+                "version-lock",
+                "VERSION-MATRIX-v2.json");
+
+        if (File.Exists(
+                target))
+        {
+            return true;
+        }
+
+        try
+        {
+            var directory =
+                Path.GetDirectoryName(
+                    target);
+
+            if (string.IsNullOrWhiteSpace(
+                    directory))
+            {
+                return false;
+            }
+
+            Directory.CreateDirectory(
+                directory);
+
+            File.WriteAllText(
+                target,
+                BuiltInJson,
+                new UTF8Encoding(
+                    encoderShouldEmitUTF8Identifier:
+                    false));
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ModuleErrorService.WriteException(
+                "control-center-version-lock-error.log",
+                ex);
+
+            return false;
+        }
+    }
+}
