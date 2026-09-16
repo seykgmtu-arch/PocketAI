@@ -6,7 +6,7 @@
     <Grid Margin="12">
 
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="420"/>
+            <ColumnDefinition Width="440"/>
             <ColumnDefinition Width="14"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
@@ -54,7 +54,118 @@
 
                     <ComboBox ItemsSource="{Binding Presets}"
                               SelectedItem="{Binding SelectedPreset}"
-                              Margin="0,5,0,8"/>
+                              Margin="0,5,0,6"/>
+
+                    <Border Background="#0E1728"
+                            BorderBrush="{StaticResource PanelBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="9"
+                            Padding="10"
+                            Margin="0,0,0,10">
+
+                        <StackPanel>
+
+                            <TextBlock Text="Параметры обучения"
+                                       FontWeight="SemiBold"/>
+
+                            <TextBlock Text="Значения редактируются. Именно они будут переданы в sd-scripts при START LoRA."
+                                       TextWrapping="Wrap"
+                                       FontSize="11"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Margin="0,3,0,8"/>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0"
+                                            Grid.Column="0">
+                                    <TextBlock Text="Resolution"/>
+                                    <TextBox Text="{Binding SelectedPreset.Resolution}"
+                                             Padding="7"
+                                             Margin="0,4,0,7"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="0"
+                                            Grid.Column="2">
+                                    <TextBlock Text="Rank"/>
+                                    <TextBox Text="{Binding SelectedPreset.Rank}"
+                                             Padding="7"
+                                             Margin="0,4,0,7"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="1"
+                                            Grid.Column="0">
+                                    <TextBlock Text="Alpha"/>
+                                    <TextBox Text="{Binding SelectedPreset.Alpha}"
+                                             Padding="7"
+                                             Margin="0,4,0,7"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="1"
+                                            Grid.Column="2">
+                                    <TextBlock Text="Epochs"/>
+                                    <TextBox Text="{Binding SelectedPreset.Epochs}"
+                                             Padding="7"
+                                             Margin="0,4,0,7"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="2"
+                                            Grid.Column="0">
+                                    <TextBlock Text="Repeats"/>
+                                    <TextBox Text="{Binding SelectedPreset.Repeats}"
+                                             Padding="7"
+                                             Margin="0,4,0,7"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="2"
+                                            Grid.Column="2">
+                                    <TextBlock Text="Learning rate"/>
+                                    <TextBox Text="{Binding SelectedPreset.LearningRate}"
+                                             Padding="7"
+                                             Margin="0,4,0,7"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="3"
+                                            Grid.Column="0">
+                                    <TextBlock Text="Optimizer"/>
+                                    <TextBox Text="{Binding SelectedPreset.Optimizer}"
+                                             Padding="7"
+                                             Margin="0,4,0,7"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="3"
+                                            Grid.Column="2">
+                                    <TextBlock Text="Precision"/>
+                                    <TextBox Text="{Binding SelectedPreset.MixedPrecision}"
+                                             Padding="7"
+                                             Margin="0,4,0,7"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="4"
+                                            Grid.ColumnSpan="3">
+                                    <TextBlock Text="Для первого теста RTX 3080 оставьте: 512 · rank 8 · alpha 8 · epochs 4 · repeats 5 · 0,0001 · AdamW · fp16."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="#C7D2FE"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+
+                            </Grid>
+
+                        </StackPanel>
+                    </Border>
 
                     <TextBlock Text="Базовая модель"
                                FontWeight="SemiBold"/>

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-
 namespace PocketAI.App.Services;
 
 public enum ImageTrainingModelFamily
@@ -11,18 +10,43 @@ public enum ImageTrainingModelFamily
     Sdxl = 1
 }
 
-public sealed record ImageTrainingPreset(
-    string Name,
-    ImageTrainingModelFamily Family,
-    int Resolution,
-    int Rank,
-    int Alpha,
-    int Epochs,
-    int Repeats,
-    double LearningRate,
-    string Optimizer,
-    string MixedPrecision)
+public sealed class ImageTrainingPreset
 {
+    public ImageTrainingPreset(
+        string name,
+        ImageTrainingModelFamily family,
+        int resolution,
+        int rank,
+        int alpha,
+        int epochs,
+        int repeats,
+        double learningRate,
+        string optimizer,
+        string mixedPrecision)
+    {
+        Name = name;
+        Family = family;
+        Resolution = resolution;
+        Rank = rank;
+        Alpha = alpha;
+        Epochs = epochs;
+        Repeats = repeats;
+        LearningRate = learningRate;
+        Optimizer = optimizer;
+        MixedPrecision = mixedPrecision;
+    }
+
+    public string Name { get; set; }
+    public ImageTrainingModelFamily Family { get; set; }
+    public int Resolution { get; set; }
+    public int Rank { get; set; }
+    public int Alpha { get; set; }
+    public int Epochs { get; set; }
+    public int Repeats { get; set; }
+    public double LearningRate { get; set; }
+    public string Optimizer { get; set; }
+    public string MixedPrecision { get; set; }
+
     public override string ToString() => Name;
 }
 
