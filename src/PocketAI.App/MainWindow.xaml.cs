@@ -32,8 +32,13 @@ public partial class MainWindow :
         DataContext =
             viewModel;
 
-        // Create Text / Audio / Video in code.
-        // MainWindow.xaml can stay unchanged.
+        // Heavy/optional modules are created in code and loaded lazily.
+        // MainWindow.xaml intentionally stays unchanged.
+        var (controlCenterTab, controlCenterHost) =
+            CreateLazyModuleTab(
+                "🛠 Control Center",
+                "Control Center будет загружен при выборе вкладки.");
+
         var (textTab, textHost) =
             CreateLazyModuleTab(
                 "📝 Text LoRA",
@@ -54,6 +59,10 @@ public partial class MainWindow :
             Math.Max(
                 0,
                 MainTabs.Items.Count - 1);
+
+        MainTabs.Items.Insert(
+            insertIndex++,
+            controlCenterTab);
 
         MainTabs.Items.Insert(
             insertIndex++,
@@ -82,6 +91,14 @@ public partial class MainWindow :
                         view =>
                             ((ImageTrainingView)view)
                             .DisposeTraining()),
+
+                [controlCenterTab] =
+                    new ModuleHostController(
+                        controlCenterHost,
+                        "Control Center",
+                        "control-center-ui-error.log",
+                        () =>
+                            new ControlCenterView()),
 
                 [textTab] =
                     new ModuleHostController(
