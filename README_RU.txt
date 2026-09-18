@@ -1,62 +1,82 @@
-PocketAI SAFE MODULES v1
-========================
+POCKETAI UNIVERSAL — TEXT LORA / llama-embedding CPU
+=======================================================
 
-Цель:
-Text LoRA, Audio и Video развиваются параллельно, но ни одна новая ветка
-не должна закрывать главное окно PocketAI при обычной ошибке UI/Python/CUDA.
+ЧТО ЗАГРУЖАТЬ В GITHUB
+----------------------
+Из этого пакета в репозиторий seykgmtu-arch/PocketAI нужно добавить:
 
-Добавляется:
-- общий ModuleHostController для ленивой загрузки тяжёлых вкладок;
-- общий ModuleErrorService;
-- общий GuardedProcessRunner;
-- логирование фоновых Task-ошибок AppCrashGuard;
-- три вкладки:
-  📝 Text LoRA
-  🎵 Audio
-  🎬 Video
-- отдельные логи:
-  logs\text-ui-error.log
-  logs\audio-ui-error.log
-  logs\video-ui-error.log
-  logs\<module>-process.log
-  logs\background-task-error.log
-  logs\fatal-unhandled-error.log
+.github/workflows/build-llama-embedding.yml
 
-АРХИТЕКТУРНОЕ ПРАВИЛО
----------------------
-Новые ML runtime НЕ загружаются внутрь PocketAI.exe.
-Python/CUDA/FFmpeg/модели запускаются отдельным процессом через GuardedProcessRunner.
-Это изолирует типичные ошибки модели от WPF.
+Файл scripts/install-text-embedding.ps1 можно также сохранить в репозитории,
+но для сборки artifact он не обязателен.
 
-Что не может быть гарантировано:
-- kernel/driver crash;
-- OutOfMemory на уровне ОС;
-- StackOverflow;
-- повреждение процесса нативным DLL.
-Такие случаи могут завершить процесс Windows независимо от try/catch.
+КАК ЗАПУСТИТЬ
+-------------
+1. GitHub -> seykgmtu-arch/PocketAI
+2. Actions
+3. Build llama-embedding Windows CPU
+4. Run workflow
+5. Дождаться зеленого завершения job build-embedding.
 
-ПРИМЕНЕНИЕ
-----------
-1. Распаковать архив в checkout репозитория.
-2. Сначала запустить APPLY-SAFE-MODULES.cmd.
-   Он аккуратно добавит три вкладки в текущий MainWindow.xaml.
-3. Скопировать папку src из пакета поверх src репозитория.
-   ВАЖНО: MainWindow.xaml.cs из пакета рассчитан на текущий main.
-4. dotnet build PocketAI.sln -c Release
-5. Открыть по очереди:
-   Training
-   Text LoRA
-   Audio
-   Video
-6. Приложение не должно закрываться.
-7. Если view падает, внутри вкладки должен появиться красный error panel,
-   а полный stack trace — в logs\...-ui-error.log.
+ЧТО СКАЧИВАТЬ ПОСЛЕ ACTIONS
+---------------------------
+Для этого шага НЕ НУЖНЫ:
+- полный PocketAI;
+- PocketAI full release;
+- общий PocketAI patch.
 
-ДАЛЬШЕ
-------
-В этот фундамент подключаем одновременно:
-A. Text LoRA: approved dataset -> train adapter -> merge -> GGUF.
-B. Audio: Stable Audio / speech worker.
-C. Video: Wan worker + ffmpeg post-processing.
+Нужно скачать ТОЛЬКО artifact:
 
-Для каждой ветки используется GuardedProcessRunner.
+llama-embedding-b10964-win-cpu-x64
+
+Внутри будет:
+llama-embedding-b10964-win-cpu-x64.zip
+
+Скопировать ZIP без распаковки сюда:
+
+F:\Pocket\llama-embedding-b10964-win-cpu-x64.zip
+
+Затем запустить:
+
+powershell -ExecutionPolicy Bypass -File F:\Pocket\install-text-embedding.ps1
+
+Если install-text-embedding.ps1 хранится не в F:\Pocket, запустить его из того
+места, где он сохранен. Скрипт сам ожидает ZIP в F:\Pocket.
+
+ЧТО ОН ИЗМЕНЯЕТ
+---------------
+Только:
+
+F:\Pocket\runtime\text\embedding\cpu\
+
+и поле embeddingExe в:
+
+F:\Pocket\runtime\text\text-lora-manifest.json
+
+НЕ ИЗМЕНЯЕТ:
+- F:\Pocket\PocketAI.exe
+- Image
+- Image Training
+- Local Agent
+- основной Knowledge/RAG
+- models\images
+- runtime\image
+
+ПОСЛЕ УСТАНОВКИ
+---------------
+Запустить:
+
+F:\Pocket\runtime\text\local-rag\RUN-LOCAL-NATIVE-RAG.cmd
+
+и указать:
+
+VECTORS.JSON
+F:\Pocket\knowledge\vectors.json
+
+EMBEDDING EXE
+F:\Pocket\runtime\text\embedding\cpu\llama-embedding.exe
+
+EMBEDDING GGUF
+F:\Pocket\models\embeddings\model.gguf
+
+Сначала нажать LOCAL CHECK.
