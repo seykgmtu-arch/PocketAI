@@ -1,0 +1,182 @@
+name: Build llama-embedding Windows CPU
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-embedding:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout PocketAI
+        uses: actions/checkout@v6
+
+      - name: Checkout llama.cpp b10964
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          git clone `
+            --depth 1 `
+            --branch b10964 `
+            https://github.com/ggml-org/llama.cpp.git `
+            llama.cpp
+
+      - name: Configure CPU-only build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          cmake `
+            -S llama.cpp `
+            -B llama.cpp/build `
+            -A x64 `
+            -DLLAMA_BUILD_TESTS=OFF `
+            -DLLAMA_BUILD_TOOLS=OFF `
+            -DLLAMA_BUILD_SERVER=OFF `
+            -DLLAMA_BUILD_APP=OFF `
+            -DLLAMA_BUILD_EXAMPLES=ON `
+            -DLLAMA_BUILD_COMMON=ON `
+            -DLLAMA_OPENSSL=OFF `
+            -DGGML_NATIVE=OFF `
+            -DGGML_CUDA=OFF `
+            -DGGML_VULKAN=OFF `
+            -DGGML_SYCL=OFF `
+            -DGGML_OPENCL=OFF `
+            -DGGML_OPENVINO=OFF
+
+      - name: Build llama-embedding
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          cmake `
+            --build llama.cpp/build `
+            --config Release `
+            --target llama-embedding `
+            --parallel 2
+
+      - name: Locate binary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $exe = Get-ChildItem `
+            ".\llama.cpp\build" `
+            -Recurse `
+            -File `
+            -Filter "llama-embedding.exe" |
+            Select-Object -First 1
+
+          if (-not $exe) {
+              throw "llama-embedding.exe was not produced."
+          }
+
+          Write-Host "FOUND:"
+          Write-Host $exe.FullName
+
+          $exe.Directory.FullName |
+            Set-Content ".\embedding-dir.txt"
+
+          & $exe.FullName --version
+
+      - name: Create portable runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $sourceDir = (Get-Content ".\embedding-dir.txt" -Raw).Trim()
+          $out = ".\dist\llama-embedding-b10964-win-cpu-x64"
+
+          Remove-Item `
+            $out `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          New-Item `
+            -ItemType Directory `
+            -Path $out `
+            -Force | Out-Null
+
+          Copy-Item `
+            "$sourceDir\llama-embedding.exe" `
+            $out `
+            -Force
+
+          # Collect all runtime DLLs from the build tree.
+          # Duplicate names are copied only once.
+          Get-ChildItem `
+            ".\llama.cpp\build" `
+            -Recurse `
+            -File `
+            -Filter "*.dll" |
+          ForEach-Object {
+              $target = Join-Path $out $_.Name
+
+              if (-not (Test-Path $target)) {
+                  Copy-Item `
+                    $_.FullName `
+                    $target `
+                    -Force
+              }
+          }
+
+          if (-not (Test-Path "$out\llama-embedding.exe")) {
+              throw "Portable runtime does not contain llama-embedding.exe"
+          }
+
+          Write-Host ""
+          Write-Host "PORTABLE CONTENTS:"
+          Get-ChildItem $out -File |
+            Sort-Object Name |
+            Select-Object Name,Length |
+            Format-Table -AutoSize
+
+      - name: Smoke test portable executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $dir = ".\dist\llama-embedding-b10964-win-cpu-x64"
+
+          Push-Location $dir
+          try {
+              .\llama-embedding.exe --version
+          }
+          finally {
+              Pop-Location
+          }
+
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $dir = ".\dist\llama-embedding-b10964-win-cpu-x64"
+          $zip = ".\dist\llama-embedding-b10964-win-cpu-x64.zip"
+
+          Compress-Archive `
+            -Path "$dir\*" `
+            -DestinationPath $zip `
+            -CompressionLevel Optimal `
+            -Force
+
+          Write-Host ""
+          Write-Host "SHA256:"
+          Get-FileHash `
+            $zip `
+            -Algorithm SHA256 |
+          Format-List
+
+      - name: Upload llama-embedding artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: llama-embedding-b10964-win-cpu-x64
+          path: dist/llama-embedding-b10964-win-cpu-x64.zip
+          if-no-files-found: error
+          retention-days: 14
